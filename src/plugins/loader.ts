@@ -12,6 +12,11 @@ import { resolveConfigEnvVars } from "../config/env-substitution.js";
 import { createConfigRuntimeEnv } from "../config/env-vars.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
+import {
+  clearEnterpriseKnowledgeFoundations,
+  listEnterpriseKnowledgeFoundations,
+  restoreEnterpriseKnowledgeFoundations,
+} from "../enterprise/knowledge.js";
 import type { GatewayRequestHandler } from "../gateway/server-methods/types.js";
 import { openRootFileSync } from "../infra/boundary-file-read.js";
 import { tryReadJsonSync } from "../infra/json-files.js";
@@ -375,6 +380,7 @@ type CachedPluginState = {
   compactionProviders: ReturnType<typeof listRegisteredCompactionProviders>;
   embeddingProviders: ReturnType<typeof listRegisteredEmbeddingProviders>;
   memoryEmbeddingProviders: ReturnType<typeof listRegisteredMemoryEmbeddingProviders>;
+  enterpriseKnowledgeFoundations: ReturnType<typeof listEnterpriseKnowledgeFoundations>;
   memoryPromptSupplements: ReturnType<typeof listMemoryPromptSupplements>;
 };
 
@@ -435,6 +441,7 @@ export function clearActivatedPluginRuntimeState(): void {
   clearPluginInteractiveHandlers();
   clearEmbeddingProviders();
   clearMemoryEmbeddingProviders();
+  clearEnterpriseKnowledgeFoundations();
   clearMemoryPluginState();
 }
 
@@ -1878,6 +1885,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         restorePluginInteractiveHandlers(cached.state.interactiveHandlers ?? []);
         restoreRegisteredEmbeddingProviders(cached.state.embeddingProviders);
         restoreRegisteredMemoryEmbeddingProviders(cached.state.memoryEmbeddingProviders);
+        restoreEnterpriseKnowledgeFoundations(cached.state.enterpriseKnowledgeFoundations);
         restoreMemoryPluginState({
           capability: cached.state.memoryCapability,
           corpusSupplements: cached.state.memoryCorpusSupplements,
@@ -2850,6 +2858,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       const previousEmbeddingProviders = listRegisteredEmbeddingProviders();
       const previousMemoryCapability = getMemoryCapabilityRegistration();
       const previousMemoryEmbeddingProviders = listRegisteredMemoryEmbeddingProviders();
+      const previousEnterpriseKnowledgeFoundations = listEnterpriseKnowledgeFoundations();
       const previousMemoryCorpusSupplements = listMemoryCorpusSupplements();
       const previousMemoryPromptSupplements = listMemoryPromptSupplements();
 
@@ -2868,6 +2877,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           restoreDetachedTaskLifecycleRuntimeRegistration(previousDetachedTaskRuntimeRegistration);
           restoreRegisteredEmbeddingProviders(previousEmbeddingProviders);
           restoreRegisteredMemoryEmbeddingProviders(previousMemoryEmbeddingProviders);
+          restoreEnterpriseKnowledgeFoundations(previousEnterpriseKnowledgeFoundations);
           restoreMemoryPluginState({
             capability: previousMemoryCapability,
             corpusSupplements: previousMemoryCorpusSupplements,
@@ -2884,6 +2894,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         restoreDetachedTaskLifecycleRuntimeRegistration(previousDetachedTaskRuntimeRegistration);
         restoreRegisteredEmbeddingProviders(previousEmbeddingProviders);
         restoreRegisteredMemoryEmbeddingProviders(previousMemoryEmbeddingProviders);
+        restoreEnterpriseKnowledgeFoundations(previousEnterpriseKnowledgeFoundations);
         restoreMemoryPluginState({
           capability: previousMemoryCapability,
           corpusSupplements: previousMemoryCorpusSupplements,
@@ -2964,6 +2975,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           compactionProviders: listRegisteredCompactionProviders(),
           embeddingProviders: listRegisteredEmbeddingProviders(),
           memoryEmbeddingProviders: listRegisteredMemoryEmbeddingProviders(),
+          enterpriseKnowledgeFoundations: listEnterpriseKnowledgeFoundations(),
           memoryPromptSupplements: listMemoryPromptSupplements(),
         },
         onlyPluginIds,
@@ -3354,6 +3366,11 @@ export async function loadOpenClawPluginCliRegistry(
     });
 
     const registrySnapshot = snapshotPluginRegistry(registry);
+    // CLI metadata loads run register with global side effects disabled, but the
+    // knowledge registry is a direct SDK global (not an injected api handler), so
+    // snapshot it and always restore — command discovery must not leave a
+    // foundation registered for a plugin that was never activated.
+    const previousEnterpriseKnowledgeFoundations = listEnterpriseKnowledgeFoundations();
     try {
       withProfile({ pluginId: record.id, source: record.source }, "cli-metadata:register", () =>
         runPluginRegisterSync(register, api),
@@ -3374,6 +3391,8 @@ export async function loadOpenClawPluginCliRegistry(
         logPrefix: `[plugins] ${record.id} failed during register from ${record.source}: `,
         diagnosticMessagePrefix: "plugin failed during register: ",
       });
+    } finally {
+      restoreEnterpriseKnowledgeFoundations(previousEnterpriseKnowledgeFoundations);
     }
   }
 

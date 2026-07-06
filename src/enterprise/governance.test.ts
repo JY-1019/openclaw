@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { evaluateRunStartGovernance, evaluateToolCallGovernance } from "./governance.js";
+import {
+  evaluateKnowledgeRetrievalGovernance,
+  evaluateRunStartGovernance,
+  evaluateToolCallGovernance,
+} from "./governance.js";
 import type { EnterprisePlanNode, EnterpriseRunPlan, GovernancePolicy } from "./types.js";
 
 function planWith(node: Partial<EnterprisePlanNode>): {
@@ -384,5 +388,47 @@ describe("evaluateToolCallGovernance path scope", () => {
     });
     expect(decision.effect).toBe("deny");
     expect(decision.policyId).toBe("leaf.deny");
+  });
+});
+
+describe("evaluateKnowledgeRetrievalGovernance", () => {
+  it("denies a foundation matched by a knowledge-scoped policy", () => {
+    const { plan, node } = planWith({});
+    const policies: GovernancePolicy[] = [
+      { id: "kb.deny", effect: "deny", knowledge: ["acme.secret-*"] },
+    ];
+    const denied = evaluateKnowledgeRetrievalGovernance({
+      plan,
+      node,
+      foundationId: "acme.secret-kb",
+      policies,
+    });
+    expect(denied.effect).toBe("deny");
+    expect(denied.policyId).toBe("kb.deny");
+
+    const allowed = evaluateKnowledgeRetrievalGovernance({
+      plan,
+      node,
+      foundationId: "acme.public-kb",
+      policies,
+    });
+    expect(allowed.effect).toBe("allow");
+    expect(allowed.source).toBe("default");
+  });
+
+  it("ignores mixed knowledge/tool policies for both subjects", () => {
+    const { plan, node } = planWith({});
+    // A tool selector cannot match a retrieval and a knowledge selector cannot
+    // match a tool call, so a policy carrying both gates neither.
+    const mixed: GovernancePolicy[] = [
+      { id: "mixed", effect: "deny", tools: ["exec"], knowledge: ["acme.kb"] },
+    ];
+    expect(
+      evaluateKnowledgeRetrievalGovernance({ plan, node, foundationId: "acme.kb", policies: mixed })
+        .effect,
+    ).toBe("allow");
+    expect(
+      evaluateToolCallGovernance({ plan, node, toolName: "exec", policies: mixed }).effect,
+    ).toBe("allow");
   });
 });

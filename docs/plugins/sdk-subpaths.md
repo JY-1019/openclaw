@@ -356,6 +356,12 @@ usage endpoint failed or returned no usable usage data.
     | `plugin-sdk/test-node-mocks` | Repo-local focused Node builtin mock helpers for use inside Vitest `vi.mock("node:*")` factories |
   </Accordion>
 
+  <Accordion title="Enterprise subpaths">
+    | Subpath | Key exports |
+    | --- | --- |
+    | `plugin-sdk/enterprise-knowledge-host` | Register a knowledge foundation adapter with the enterprise knowledge registry via `registerEnterpriseKnowledgeFoundation`, plus the `KnowledgeFoundationAdapter` and `KnowledgeSnippet` types a bundled adapter (e.g. LightRAG) implements. |
+  </Accordion>
+
   <Accordion title="Memory subpaths">
     | Subpath | Key exports |
     | --- | --- |

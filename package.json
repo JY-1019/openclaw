@@ -1133,6 +1133,10 @@
       "types": "./dist/plugin-sdk/qa-live-transport-scenarios.d.ts",
       "default": "./dist/plugin-sdk/qa-live-transport-scenarios.js"
     },
+    "./plugin-sdk/enterprise-knowledge-host": {
+      "types": "./dist/plugin-sdk/enterprise-knowledge-host.d.ts",
+      "default": "./dist/plugin-sdk/enterprise-knowledge-host.js"
+    },
     "./plugin-sdk/memory-core": {
       "types": "./dist/plugin-sdk/memory-core.d.ts",
       "default": "./dist/plugin-sdk/memory-core.js"

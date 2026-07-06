@@ -8,6 +8,8 @@ import type { SourceReplyDeliveryMode } from "../auto-reply/get-reply-options.ty
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
 import { selectApplicableRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { listEnterpriseKnowledgeFoundationIds } from "../enterprise/knowledge.js";
+import { getEnterpriseActiveRun } from "../enterprise/runtime.js";
 import { callGateway } from "../gateway/call.js";
 import { isEmbeddedMode } from "../infra/embedded-mode.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
@@ -53,6 +55,7 @@ import {
 import { createHeartbeatResponseTool } from "./tools/heartbeat-response-tool.js";
 import { createImageGenerateTool } from "./tools/image-generate-tool.js";
 import { createImageTool } from "./tools/image-tool.js";
+import { createKnowledgeSearchTool } from "./tools/knowledge-search-tool.js";
 import { createMessageTool } from "./tools/message-tool.js";
 import { createMusicGenerateTool } from "./tools/music-generate-tool.js";
 import { createNodesTool } from "./tools/nodes-tool.js";
@@ -188,6 +191,17 @@ export function createOpenClawTools(
   } & SpawnedToolContext,
 ): AnyAgentTool[] {
   const resolvedConfig = options?.config ?? openClawToolsDeps.config;
+  // Expose knowledge_search only when this run is actually enterprise-mediated
+  // (an active run is registered — the authoritative signal that also respects
+  // enterprise.mode "off" via the runtime snapshot mediation used) and a
+  // knowledge foundation is registered. Otherwise the stock tool list is
+  // unchanged (foundations are process-stable, so this stays fixed per run).
+  const enterpriseKnowledgeRunId =
+    options?.runId &&
+    getEnterpriseActiveRun(options.runId) &&
+    listEnterpriseKnowledgeFoundationIds().length > 0
+      ? options.runId
+      : undefined;
   const runtimeSnapshot = getActiveSecretsRuntimeConfigSnapshot();
   const availabilityConfig = selectApplicableRuntimeConfig({
     inputConfig: resolvedConfig,
@@ -457,6 +471,9 @@ export function createOpenClawTools(
       agentSessionKey: options?.agentSessionKey,
       requesterAgentIdOverride: options?.requesterAgentIdOverride,
     }),
+    ...(enterpriseKnowledgeRunId
+      ? [createKnowledgeSearchTool({ runId: enterpriseKnowledgeRunId })]
+      : []),
     createGetGoalTool({
       agentSessionKey: options?.agentSessionKey,
       runSessionKey: options?.runSessionKey,

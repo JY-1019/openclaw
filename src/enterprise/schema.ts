@@ -170,6 +170,7 @@ export const GovernancePolicySchema = z
     nodes: GovernanceSelectorSchema,
     tools: GovernanceSelectorSchema,
     actions: GovernanceSelectorSchema,
+    knowledge: GovernanceSelectorSchema,
     approval: GovernanceApprovalSettingsSchema,
   })
   .strict();

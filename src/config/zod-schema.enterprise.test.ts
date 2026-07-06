@@ -29,6 +29,36 @@ describe("EnterpriseConfigSchema", () => {
     expect(EnterpriseConfigSchema.safeParse({}).success).toBe(true);
   });
 
+  it("accepts a knowledge-scoped policy but rejects require_approval on knowledge", () => {
+    expect(
+      EnterpriseConfigSchema.safeParse({
+        governance: {
+          policies: [
+            { id: "kb.deny", effect: "deny", knowledge: ["acme.secret-*"] },
+            { id: "kb.audit", effect: "audit", knowledge: ["acme.*"] },
+          ],
+        },
+      }).success,
+    ).toBe(true);
+    // Knowledge retrieval has no interactive approval channel, so a knowledge-
+    // only require_approval policy is rejected like a run-level one.
+    expect(
+      EnterpriseConfigSchema.safeParse({
+        governance: {
+          policies: [{ id: "kb.approve", effect: "require_approval", knowledge: ["acme.kb"] }],
+        },
+      }).success,
+    ).toBe(false);
+    // A policy targets tool calls OR knowledge, not both.
+    expect(
+      EnterpriseConfigSchema.safeParse({
+        governance: {
+          policies: [{ id: "kb.mixed", effect: "deny", tools: ["exec"], knowledge: ["acme.kb"] }],
+        },
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects unknown modes, unknown keys, and malformed policy ids", () => {
     expect(EnterpriseConfigSchema.safeParse({ mode: "strict" }).success).toBe(false);
     expect(EnterpriseConfigSchema.safeParse({ unknown: true }).success).toBe(false);
@@ -45,7 +75,7 @@ describe("EnterpriseConfigSchema", () => {
   });
 
   it("rejects empty selector arrays (omit means run-level, not empty)", () => {
-    for (const selector of ["tools", "trees", "nodes"] as const) {
+    for (const selector of ["tools", "trees", "nodes", "knowledge"] as const) {
       const result = EnterpriseConfigSchema.safeParse({
         governance: { policies: [{ id: "ok.id", effect: "deny", [selector]: [] }] },
       });

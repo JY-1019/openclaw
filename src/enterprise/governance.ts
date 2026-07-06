@@ -29,7 +29,7 @@ function matchesSelector(value: string, globs: readonly string[] | undefined): b
 }
 
 function hasSubjectSelectors(policy: GovernancePolicy): boolean {
-  return Boolean(policy.tools?.length || policy.actions?.length);
+  return Boolean(policy.tools?.length || policy.actions?.length || policy.knowledge?.length);
 }
 
 /** Whether a policy's tree selector matches (or is unset for) the given tree. */
@@ -97,6 +97,11 @@ function policyAppliesToToolCall(
   const actionScoped = Boolean(policy.actions?.length);
   if (!toolScoped && !actionScoped) {
     // Selector-less policies target runs, not calls.
+    return false;
+  }
+  if (policy.knowledge?.length) {
+    // A knowledge selector cannot match a tool call, and "all present selectors
+    // must match", so a knowledge-scoped policy never applies to tool calls.
     return false;
   }
   if (toolScoped && !matchesSelector(params.toolName, policy.tools)) {
@@ -170,6 +175,60 @@ export function evaluateToolCallGovernance(params: {
     policyId: null,
     source: "default",
     reason: "no governance policy restricts this tool call",
+  };
+}
+
+function policyAppliesToKnowledge(
+  policy: GovernancePolicy,
+  params: { treeId: string; path: readonly EnterprisePlanNode[]; foundationId: string },
+): boolean {
+  if (!policy.knowledge?.length || !matchesSelector(params.foundationId, policy.knowledge)) {
+    return false;
+  }
+  if (policy.tools?.length || policy.actions?.length) {
+    // A tool/action selector cannot match a knowledge retrieval, and "all
+    // present selectors must match", so such a policy never gates retrieval.
+    return false;
+  }
+  // Node selector matches any node on the active step's root→active path, so a
+  // policy pinned to the workflow root keeps covering knowledge from leaves.
+  const nodeMatches = params.path.some((node) => matchesSelector(node.nodeId, policy.nodes));
+  return matchesSelector(params.treeId, policy.trees) && nodeMatches;
+}
+
+/**
+ * Evaluate governance for retrieving from one knowledge foundation under the
+ * active plan node. `path` is the root→active chain (defaults to the node
+ * alone). Which foundations a step may query at all is an ontology allow-list
+ * enforced before this call; here config policies gate the foundations in scope.
+ */
+export function evaluateKnowledgeRetrievalGovernance(params: {
+  plan: EnterpriseRunPlan;
+  node: EnterprisePlanNode;
+  foundationId: string;
+  policies: readonly GovernancePolicy[];
+  path?: readonly EnterprisePlanNode[];
+}): GovernanceDecision {
+  const path = params.path ?? [params.node];
+  const matching = params.policies.filter((policy) =>
+    policyAppliesToKnowledge(policy, {
+      treeId: params.plan.treeId,
+      path,
+      foundationId: params.foundationId,
+    }),
+  );
+  const decision = resolvePolicyDecision(
+    matching,
+    () => `knowledge foundation "${params.foundationId}"`,
+  );
+  if (decision) {
+    return decision;
+  }
+  return {
+    effect: "allow",
+    policyId: null,
+    source: "default",
+    reason: "no governance policy restricts this knowledge foundation",
   };
 }
 

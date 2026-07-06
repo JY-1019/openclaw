@@ -636,6 +636,7 @@ export const FIELD_LABELS: Record<string, string> = {
   "enterprise.governance.policies[].nodes": "Enterprise Governance Policy Nodes",
   "enterprise.governance.policies[].tools": "Enterprise Governance Policy Tools",
   "enterprise.governance.policies[].actions": "Enterprise Governance Policy Actions",
+  "enterprise.governance.policies[].knowledge": "Enterprise Governance Policy Knowledge",
   "enterprise.governance.policies[].approval": "Enterprise Governance Policy Approval",
   "enterprise.governance.policies[].approval.timeoutMs":
     "Enterprise Governance Approval Timeout Ms",

@@ -55,6 +55,7 @@ const CORE_TOOL_SECTION_ORDER: Array<{ id: string; label: string }> = [
   { id: "nodes", label: "Nodes" },
   { id: "agents", label: "Agents" },
   { id: "media", label: "Media" },
+  { id: "enterprise", label: "Enterprise" },
 ];
 
 const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
@@ -266,6 +267,16 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     sectionId: "agents",
     profiles: [],
     includeInOpenClawGroup: true,
+  },
+  {
+    // Enterprise-only, opt-in tool: its own `group:enterprise` and excluded from
+    // group:openclaw/group:memory so it never widens existing broad allowlists.
+    id: "knowledge_search",
+    label: "knowledge_search",
+    description: "Search enterprise knowledge foundations",
+    sectionId: "enterprise",
+    profiles: [],
+    includeInOpenClawGroup: false,
   },
   {
     id: "get_goal",

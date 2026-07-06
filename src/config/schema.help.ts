@@ -265,9 +265,11 @@ export const FIELD_HELP: Record<string, string> = {
   "enterprise.governance.policies[].nodes":
     "Workflow node id globs this policy applies to. Omit to match every node.",
   "enterprise.governance.policies[].tools":
-    "Tool name globs this policy applies to. Omit all subject selectors (tools, actions) to make this a run-level policy evaluated when the workflow tree is selected.",
+    "Tool name globs this policy applies to. Omit all subject selectors (tools, actions, knowledge) to make this a run-level policy evaluated when the workflow tree is selected.",
   "enterprise.governance.policies[].actions":
     "Ontology action id globs this policy applies to. The policy matches tool calls covered by a matching action declared on the active workflow node (an action without tools covers every tool).",
+  "enterprise.governance.policies[].knowledge":
+    "Knowledge foundation id globs this policy applies to. The policy gates retrieval from matching foundations for the active workflow step (deny/audit; require_approval is not supported for knowledge).",
   "enterprise.governance.policies[].approval":
     'Approval delivery settings used when effect is "require_approval": how long to wait for a reviewer and what happens on timeout.',
   "enterprise.governance.policies[].approval.timeoutMs":

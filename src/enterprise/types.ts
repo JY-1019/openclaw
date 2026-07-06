@@ -135,6 +135,8 @@ export type GovernancePolicy = {
    * action's tool globs (an action without tools covers every tool).
    */
   actions?: string[];
+  /** Knowledge foundation id globs (knowledge-retrieval scope). */
+  knowledge?: string[];
   /** Approval settings when effect is "require_approval". */
   approval?: GovernanceApprovalSettings;
 };
@@ -193,6 +195,34 @@ export type EnterpriseRunStatus =
   | "blocked"
   | "aborted"
   | "timed_out";
+
+/** One retrieved knowledge snippet returned by a foundation adapter. */
+export type KnowledgeSnippet = {
+  /** Foundation the snippet came from. */
+  foundationId: EnterpriseId;
+  /** Short title/reference for the snippet, when the source provides one. */
+  title?: string;
+  text: string;
+  /** Adapter-provided relevance score (higher is better) when available. */
+  score?: number;
+  /** Origin path/uri/citation the model can surface. */
+  source?: string;
+};
+
+/**
+ * Adapter that retrieves from one knowledge foundation. Plugins (e.g. LightRAG)
+ * register an adapter per foundation id; the built-in in-memory adapter serves
+ * examples and tests.
+ */
+export type KnowledgeFoundationAdapter = {
+  retrieve(params: {
+    foundationId: EnterpriseId;
+    query: string;
+    limit: number;
+    /** Aborts when the agent run is cancelled/timed out; remote adapters honor it. */
+    signal?: AbortSignal;
+  }): Promise<KnowledgeSnippet[]>;
+};
 
 /**
  * Trace event kinds appended to enterprise_run_events. `node.entered` /

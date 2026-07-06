@@ -22,6 +22,14 @@ const GovernancePolicyWithApprovalScopeSchema = GovernancePolicySchema.superRefi
         message: 'approval settings only apply when effect is "require_approval"',
       });
     }
+    if (policy.knowledge?.length && (policy.tools?.length || policy.actions?.length)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["knowledge"],
+        message:
+          "a policy targets either tool calls (tools/actions) or knowledge retrieval (knowledge), not both; split them into separate policies",
+      });
+    }
   },
 );
 

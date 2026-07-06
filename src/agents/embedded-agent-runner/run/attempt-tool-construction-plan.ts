@@ -29,6 +29,7 @@ const OPENCLAW_TOOL_FACTORY_NAMES = new Set([
   "heartbeat_response",
   "image",
   "image_generate",
+  "knowledge_search",
   "message",
   "music_generate",
   "nodes",

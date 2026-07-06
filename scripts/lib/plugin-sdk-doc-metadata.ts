@@ -51,6 +51,9 @@ export const pluginSdkDocMetadata = {
   "access-groups": {
     category: "channel",
   },
+  "enterprise-knowledge-host": {
+    category: "utilities",
+  },
   "channel-actions": {
     category: "channel",
   },
