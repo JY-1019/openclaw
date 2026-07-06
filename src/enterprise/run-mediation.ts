@@ -27,6 +27,7 @@ import {
   appendEnterpriseRunEvent,
   finalizeEnterpriseRun,
   persistEnterpriseRunStart,
+  updateEnterpriseRunPlan,
 } from "./trace-store.sqlite.js";
 import { getWorkflowTreeRegistrySnapshot } from "./tree-registry.js";
 import type { EnterpriseRunEventKind, EnterpriseRunPlan, EnterpriseRunStatus } from "./types.js";
@@ -119,6 +120,13 @@ export function beginEnterpriseRun(params: BeginEnterpriseRunParams): Enterprise
       persistTrace(() => {
         appendEvent(run, event.kind, event.nodeId, event.payload);
       });
+      // Advancement mutated run.plan.activeNodeId in place; re-persist the plan
+      // so trace reads reflect the current step, not the run-start root.
+      if (event.kind === "node.entered") {
+        persistTrace(() => {
+          updateEnterpriseRunPlan({ executionId: run.executionId, plan: run.plan });
+        });
+      }
     },
   };
 
@@ -171,6 +179,10 @@ export function beginEnterpriseRun(params: BeginEnterpriseRunParams): Enterprise
 
   mediatedRuns.set(params.runId, run);
   registerEnterpriseActiveRun(run);
+  // The node.entered/completed step timeline is owned by the embedded step-loop
+  // hook (the only runtime that advances), so mediation stays timeline-free.
+  // CLI/ACP runs never advance and therefore never claim leaf steps they
+  // skipped; the sink still re-persists the plan whenever a step is entered.
   return { kind: "mediated", plan, promptSection: buildEnterprisePromptSection(plan) };
 }
 
@@ -186,6 +198,9 @@ export function endEnterpriseRun(params: {
   }
   mediatedRuns.delete(params.runId);
   unregisterEnterpriseActiveRun(params.runId);
+  // The final step stays "entered" without an explicit node.completed; run.ended
+  // carries the terminal status that closes the run (the step-loop hook owns the
+  // per-step completed transitions it can actually observe).
   persistTrace(() => {
     appendEvent(run, "run.ended", null, {
       status: params.status,

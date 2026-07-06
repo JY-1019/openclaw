@@ -9,13 +9,13 @@ import type {
   EnterpriseMode,
   EnterprisePlanNode,
   EnterpriseRunPlan,
+  OntologyBinding,
   WorkflowNodeDefinition,
   WorkflowTreeDefinition,
   WorkflowTreeTrigger,
 } from "./types.js";
 
 const REQUEST_SUMMARY_MAX_CHARS = 300;
-const DIGEST_MAX_STEP_LINES = 12;
 const DIGEST_MAX_HINT_LINES = 8;
 
 /** Map an embedded run trigger + spawn lineage onto tree trigger classes. */
@@ -153,8 +153,10 @@ export function buildEnterpriseRunPlan(params: {
     matchedBy: selection.matchedBy,
     requestSummary: summarizeRequestText(params.requestText),
     nodes,
-    // Slice 1 scopes execution with the subtree root's ontology; per-leaf
-    // step advancement is owned by the workflow-runtime slice.
+    // Runs start at the subtree root, the general scope every mediated runtime
+    // enforces. Only runtimes that install the step-loop hook (embedded) enter
+    // the first leaf and advance through the leaf steps; CLI/ACP stay on the
+    // root scope rather than freezing on an arbitrary leaf they can't advance.
     activeNodeId: nodes[0].nodeId,
     mode: params.mode,
     createdAt: params.now ?? Date.now(),
@@ -169,17 +171,38 @@ export function findPlanNode(
 }
 
 /**
- * Compact per-run system prompt section describing the bound workflow step.
- * Returns an empty string when the active ontology carries no guidance so the
- * built-in permissive trees add zero prompt bytes (prompt-cache/back-compat).
+ * Ancestor chain from the subtree root down to `nodeId` (inclusive). Governance
+ * evaluates the tool call against every node on this path so a deeper step
+ * cannot escape the scope its ancestors declared. Returns [] when the node is
+ * missing. The walk is bounded by the node count so a malformed parentId chain
+ * can never spin.
  */
-export function buildEnterprisePromptSection(plan: EnterpriseRunPlan): string {
-  const active = findPlanNode(plan, plan.activeNodeId);
-  if (!active) {
-    return "";
+export function resolvePlanNodePath(plan: EnterpriseRunPlan, nodeId: string): EnterprisePlanNode[] {
+  const byId = new Map(plan.nodes.map((node) => [node.nodeId, node]));
+  const path: EnterprisePlanNode[] = [];
+  let current = byId.get(nodeId);
+  while (current && path.length <= plan.nodes.length) {
+    path.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
   }
-  const ontology = active.ontology;
-  const hasGuidance = Boolean(
+  return path.toReversed();
+}
+
+/**
+ * Ordered node ids the run steps through: the depth-first leaf nodes. Interior
+ * nodes only provide inherited scope, so the cursor visits leaves (concrete
+ * work). A childless root is itself the single leaf/step.
+ */
+export function enterpriseStepSequence(plan: EnterpriseRunPlan): string[] {
+  const parentIds = new Set(
+    plan.nodes.map((node) => node.parentId).filter((id): id is string => id !== null),
+  );
+  return plan.nodes.filter((node) => !parentIds.has(node.nodeId)).map((node) => node.nodeId);
+}
+
+/** True when an ontology carries model-facing guidance (digest is non-empty). */
+export function ontologyHasGuidance(ontology: OntologyBinding): boolean {
+  return Boolean(
     ontology.constraints?.length ||
     ontology.contextHints?.length ||
     ontology.allowedTools?.length ||
@@ -188,23 +211,29 @@ export function buildEnterprisePromptSection(plan: EnterpriseRunPlan): string {
     ontology.knowledgeFoundations?.length ||
     ontology.expectedOutput,
   );
-  if (!hasGuidance) {
-    return "";
+}
+
+/**
+ * Whether a run should advance and trace per-node steps. Only governed trees
+ * qualify: the root must have sub-steps (a leaf distinct from the root that the
+ * hook enters and enforces — true whenever the plan has more than the root
+ * node) and some node must carry ontology guidance or opt into auditing.
+ * Guidance-free built-in runs stay step-quiet so the stock path adds no per-run
+ * trace writes (slice 1).
+ */
+export function planTracksSteps(plan: EnterpriseRunPlan): boolean {
+  if (plan.nodes.length <= 1) {
+    return false;
   }
-  const lines: string[] = [
-    "## Enterprise workflow",
-    `This run is governed by workflow "${plan.treeName}" (${plan.treeId}@${plan.treeVersion}).`,
-    `Current step: ${active.title}${active.description ? ` — ${active.description}` : ""}`,
-  ];
-  const steps = plan.nodes.filter((node) => node.parentId === active.nodeId);
-  if (steps.length > 0) {
-    lines.push("Planned steps:");
-    for (const step of steps.slice(0, DIGEST_MAX_STEP_LINES)) {
-      lines.push(`${step.seq}. ${step.title}`);
-    }
-  }
+  return plan.nodes.some(
+    (node) => ontologyHasGuidance(node.ontology) || node.ontology.audit === true,
+  );
+}
+
+/** Append one node's ontology guidance to the digest, indented under its step. */
+function appendOntologyGuidance(lines: string[], ontology: OntologyBinding, indent: string): void {
   if (ontology.actions?.length) {
-    lines.push("Actions:");
+    lines.push(`${indent}Actions:`);
     for (const action of ontology.actions.slice(0, DIGEST_MAX_HINT_LINES)) {
       const detail = [
         action.description,
@@ -212,32 +241,60 @@ export function buildEnterprisePromptSection(plan: EnterpriseRunPlan): string {
       ]
         .filter(Boolean)
         .join(" — ");
-      lines.push(`- ${action.id}${detail ? `: ${detail}` : ""}`);
+      lines.push(`${indent}- ${action.id}${detail ? `: ${detail}` : ""}`);
     }
   }
   if (ontology.constraints?.length) {
-    lines.push("Constraints:");
+    lines.push(`${indent}Constraints:`);
     for (const constraint of ontology.constraints.slice(0, DIGEST_MAX_HINT_LINES)) {
-      lines.push(`- ${constraint.description}`);
+      lines.push(`${indent}- ${constraint.description}`);
     }
   }
   if (ontology.contextHints?.length) {
-    lines.push("Context:");
+    lines.push(`${indent}Context:`);
     for (const hint of ontology.contextHints.slice(0, DIGEST_MAX_HINT_LINES)) {
-      lines.push(`- ${hint}`);
+      lines.push(`${indent}- ${hint}`);
     }
   }
   if (ontology.allowedTools?.length) {
-    lines.push(`Allowed tools: ${ontology.allowedTools.toSorted().join(", ")}`);
+    lines.push(`${indent}Allowed tools: ${ontology.allowedTools.toSorted().join(", ")}`);
   }
   if (ontology.deniedTools?.length) {
-    lines.push(`Denied tools: ${ontology.deniedTools.toSorted().join(", ")}`);
+    lines.push(`${indent}Denied tools: ${ontology.deniedTools.toSorted().join(", ")}`);
   }
   if (ontology.knowledgeFoundations?.length) {
-    lines.push(`Knowledge sources: ${ontology.knowledgeFoundations.toSorted().join(", ")}`);
+    lines.push(
+      `${indent}Knowledge sources: ${ontology.knowledgeFoundations.toSorted().join(", ")}`,
+    );
   }
   if (ontology.expectedOutput) {
-    lines.push(`Expected output: ${ontology.expectedOutput}`);
+    lines.push(`${indent}Expected output: ${ontology.expectedOutput}`);
+  }
+}
+
+/**
+ * Per-run system prompt section describing the whole bound workflow. The run
+ * advances through steps at execution time and governance enforces each step's
+ * ontology, so the model must see every step's guidance up front — otherwise a
+ * later step's denial or approval fires for instructions it never received.
+ * Returns an empty string when no node carries guidance so the built-in
+ * permissive trees add zero prompt bytes (prompt-cache/back-compat).
+ */
+export function buildEnterprisePromptSection(plan: EnterpriseRunPlan): string {
+  if (!plan.nodes.some((node) => ontologyHasGuidance(node.ontology))) {
+    return "";
+  }
+  const lines: string[] = [
+    "## Enterprise workflow",
+    `This run is governed by workflow "${plan.treeName}" (${plan.treeId}@${plan.treeVersion}). Work the steps in order and respect each step's constraints and tool scope.`,
+    "Steps:",
+  ];
+  // Render every step: governance advances into and enforces each one, so a
+  // later step must not have its rules omitted (only per-category hint lists are
+  // bounded). Trees are operator-authored, so total size stays reasonable.
+  for (const node of plan.nodes) {
+    lines.push(`${node.seq}. ${node.title}${node.description ? ` — ${node.description}` : ""}`);
+    appendOntologyGuidance(lines, node.ontology, "   ");
   }
   return lines.join("\n");
 }

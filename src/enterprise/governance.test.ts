@@ -223,4 +223,166 @@ describe("evaluateRunStartGovernance", () => {
     expect(decision.policyId).toBe("run.audit");
     expect(decision.source).toBe("policy");
   });
+
+  it("matches root-scoped run-level policies even when the run starts on a leaf", () => {
+    // Multi-step plans start execution on the first leaf, but run-level policies
+    // scoped to the root must still fire at run start.
+    const root: EnterprisePlanNode = {
+      nodeId: "refunds",
+      parentId: null,
+      seq: 0,
+      title: "Refunds",
+      ontology: {},
+    };
+    const leaf: EnterprisePlanNode = {
+      nodeId: "refunds.verify",
+      parentId: "refunds",
+      seq: 1,
+      title: "Verify",
+      ontology: {},
+    };
+    const plan: EnterpriseRunPlan = {
+      runId: "run-1",
+      treeId: "acme.refunds",
+      treeVersion: "1.0.0",
+      treeName: "Refunds",
+      matchedBy: "keywords",
+      requestSummary: "refund",
+      nodes: [root, leaf],
+      activeNodeId: leaf.nodeId,
+      mode: "enforce",
+      createdAt: 0,
+    };
+    const policies: GovernancePolicy[] = [
+      { id: "run.deny.root", effect: "deny", trees: ["acme.*"], nodes: ["refunds"] },
+    ];
+    const decision = evaluateRunStartGovernance({ plan, policies });
+    expect(decision.effect).toBe("deny");
+    expect(decision.policyId).toBe("run.deny.root");
+  });
+});
+
+describe("evaluateToolCallGovernance path scope", () => {
+  function nestedPlan(): { plan: EnterpriseRunPlan; path: EnterprisePlanNode[] } {
+    const root: EnterprisePlanNode = {
+      nodeId: "ops",
+      parentId: null,
+      seq: 0,
+      title: "Operate",
+      ontology: {
+        allowedTools: ["memory_search", "message"],
+        actions: [{ id: "lookup", tools: ["memory_search"] }],
+      },
+    };
+    const leaf: EnterprisePlanNode = {
+      nodeId: "ops.step",
+      parentId: "ops",
+      seq: 1,
+      title: "Step",
+      ontology: { deniedTools: ["message"] },
+    };
+    const plan: EnterpriseRunPlan = {
+      runId: "run-1",
+      treeId: "acme.ops",
+      treeVersion: "1.0.0",
+      treeName: "Ops",
+      matchedBy: "keywords",
+      requestSummary: "op",
+      nodes: [root, leaf],
+      activeNodeId: leaf.nodeId,
+      mode: "enforce",
+      createdAt: 0,
+    };
+    return { plan, path: [root, leaf] };
+  }
+
+  it("denies at the ancestor level when the root scope excludes the tool", () => {
+    const { plan, path } = nestedPlan();
+    const decision = evaluateToolCallGovernance({
+      plan,
+      node: path[1],
+      toolName: "exec",
+      policies: [],
+      path,
+    });
+    expect(decision.effect).toBe("deny");
+    expect(decision.source).toBe("ontology");
+    expect(decision.reason).toContain('"ops"');
+  });
+
+  it("denies at the leaf level when a deeper step narrows the scope", () => {
+    const { plan, path } = nestedPlan();
+    const decision = evaluateToolCallGovernance({
+      plan,
+      node: path[1],
+      toolName: "message",
+      policies: [],
+      path,
+    });
+    expect(decision.effect).toBe("deny");
+    expect(decision.reason).toContain('"ops.step"');
+  });
+
+  it("allows a tool permitted by every level on the path", () => {
+    const { plan, path } = nestedPlan();
+    const decision = evaluateToolCallGovernance({
+      plan,
+      node: path[1],
+      toolName: "memory_search",
+      policies: [],
+      path,
+    });
+    expect(decision.effect).toBe("allow");
+  });
+
+  it("matches action-scoped policies against ancestor actions on the path", () => {
+    const { plan, path } = nestedPlan();
+    const policies: GovernancePolicy[] = [
+      { id: "audit.lookup", effect: "require_approval", actions: ["lookup"] },
+    ];
+    const decision = evaluateToolCallGovernance({
+      plan,
+      node: path[1],
+      toolName: "memory_search",
+      policies,
+      path,
+    });
+    expect(decision.effect).toBe("require_approval");
+    expect(decision.policyId).toBe("audit.lookup");
+  });
+
+  it("keeps root-scoped node policies applying after advancing into a leaf", () => {
+    const { plan, path } = nestedPlan();
+    // Policy pinned to the workflow root ("ops"), evaluated while the active
+    // node is the leaf: it must still deny (would silently fall back to allow
+    // if node matching only saw the active leaf).
+    const policies: GovernancePolicy[] = [
+      { id: "root.deny", effect: "deny", tools: ["memory_search"], nodes: ["ops"] },
+    ];
+    const decision = evaluateToolCallGovernance({
+      plan,
+      node: path[1],
+      toolName: "memory_search",
+      policies,
+      path,
+    });
+    expect(decision.effect).toBe("deny");
+    expect(decision.policyId).toBe("root.deny");
+  });
+
+  it("still honors leaf-scoped node policies", () => {
+    const { plan, path } = nestedPlan();
+    const policies: GovernancePolicy[] = [
+      { id: "leaf.deny", effect: "deny", tools: ["memory_search"], nodes: ["ops.step"] },
+    ];
+    const decision = evaluateToolCallGovernance({
+      plan,
+      node: path[1],
+      toolName: "memory_search",
+      policies,
+      path,
+    });
+    expect(decision.effect).toBe("deny");
+    expect(decision.policyId).toBe("leaf.deny");
+  });
 });

@@ -175,9 +175,10 @@ export type EnterpriseRunPlan = {
   /** Depth-first flattened subtree nodes. */
   nodes: EnterprisePlanNode[];
   /**
-   * Node whose ontology constrains execution. Slice 1 activates the subtree
-   * root (its ontology scopes the whole run); per-leaf advancement is the
-   * workflow-runtime slice.
+   * Node whose step the run is currently executing. Starts at the subtree root
+   * and advances through the depth-first leaf sequence as turns progress.
+   * Governance scopes the tool call with this node's ontology merged down the
+   * root→node path (see resolvePlanNodePath), so the root scope always holds.
    */
   activeNodeId: EnterpriseId;
   mode: Exclude<EnterpriseMode, "off">;
@@ -193,5 +194,15 @@ export type EnterpriseRunStatus =
   | "aborted"
   | "timed_out";
 
-/** Trace event kinds appended to enterprise_run_events. */
-export type EnterpriseRunEventKind = "run.started" | "run.ended" | "governance.decision";
+/**
+ * Trace event kinds appended to enterprise_run_events. `node.entered` /
+ * `node.completed` bracket each workflow step as the run advances through the
+ * plan; they are only emitted for governed trees (a node carries ontology
+ * guidance), so guidance-free built-in runs stay write-quiet like slice 1.
+ */
+export type EnterpriseRunEventKind =
+  | "run.started"
+  | "run.ended"
+  | "governance.decision"
+  | "node.entered"
+  | "node.completed";

@@ -6,7 +6,12 @@ import {
   clearEnterpriseRunMediationForTest,
   endEnterpriseRun,
 } from "./run-mediation.js";
-import { evaluateEnterpriseToolCall, getEnterpriseActiveRun } from "./runtime.js";
+import {
+  evaluateEnterpriseToolCall,
+  getEnterpriseActiveRun,
+  recordEnterpriseTurnExecuted,
+  setEnterpriseStepForTurn,
+} from "./runtime.js";
 import {
   getEnterpriseRunRecord,
   listEnterpriseRunEvents,
@@ -283,6 +288,7 @@ describe("beginEnterpriseRun", () => {
       enforced: true,
       policyId: "deny.exec",
     });
+    // Non-embedded runs stay on the root scope (no step-loop hook advances).
     expect(decision?.nodeId).toBe("assist");
   });
 });
@@ -299,5 +305,95 @@ describe("endEnterpriseRun", () => {
     expect(listEnterpriseRunExecutions(runId)).toHaveLength(1);
     expect(getEnterpriseRunRecord(runId)?.status).toBe("completed");
     expect(latestEventKinds(runId)).toEqual(["run.started", "run.ended"]);
+  });
+});
+
+describe("enterprise step tracing", () => {
+  async function withFlowTree<T>(run: () => T | Promise<T>): Promise<T> {
+    const { importWorkflowTreeContent, removeImportedWorkflowTree } = await import("./tree-io.js");
+    const { invalidateWorkflowTreeRegistry } = await import("./tree-registry.js");
+    const imported = importWorkflowTreeContent({
+      content: JSON.stringify({
+        schema: "clawworks.workflow-tree",
+        schemaVersion: 1,
+        id: "acme.flow",
+        version: "1.0.0",
+        name: "Flow",
+        match: { keywords: ["flowtest"], triggers: ["user"] },
+        root: {
+          id: "flow",
+          title: "Run the flow",
+          ontology: { allowedTools: ["message"] },
+          children: [
+            { id: "flow.a", title: "Step A" },
+            { id: "flow.b", title: "Step B" },
+          ],
+        },
+      }),
+      format: "json",
+    });
+    expect(imported.ok).toBe(true);
+    try {
+      return await run();
+    } finally {
+      removeImportedWorkflowTree("acme.flow");
+      invalidateWorkflowTreeRegistry();
+    }
+  }
+
+  it("records the hook-driven step timeline (open + advance) in trace order", async () => {
+    await withFlowTree(() => {
+      const runId = nextRunId();
+      const mediation = beginEnterpriseRun({ runId, prompt: "run the flowtest now" });
+      expect(mediation.kind).toBe("mediated");
+      // Simulate the embedded step-loop hook across two turns: enter the first
+      // leaf, record the turn, then advance to the next leaf.
+      setEnterpriseStepForTurn(runId);
+      recordEnterpriseTurnExecuted(runId);
+      setEnterpriseStepForTurn(runId);
+      endEnterpriseRun({ runId, status: "completed" });
+
+      const record = getEnterpriseRunRecord(runId);
+      const events = listEnterpriseRunEvents(record?.executionId ?? "");
+      expect(events.map((event) => `${event.kind}:${event.nodeId ?? "-"}`)).toEqual([
+        "run.started:-",
+        "node.entered:flow.a",
+        "node.completed:flow.a",
+        "node.entered:flow.b",
+        "run.ended:-",
+      ]);
+    });
+  });
+
+  it("re-persists the plan so the trace reports the advanced active node", async () => {
+    await withFlowTree(() => {
+      const runId = nextRunId();
+      beginEnterpriseRun({ runId, prompt: "run the flowtest now" });
+      // Run-start snapshot points at the root scope.
+      expect(getEnterpriseRunRecord(runId)?.plan.activeNodeId).toBe("flow");
+      setEnterpriseStepForTurn(runId);
+      expect(getEnterpriseRunRecord(runId)?.plan.activeNodeId).toBe("flow.a");
+      recordEnterpriseTurnExecuted(runId);
+      setEnterpriseStepForTurn(runId);
+      // After advancement the persisted plan tracks the current leaf.
+      expect(getEnterpriseRunRecord(runId)?.plan.activeNodeId).toBe("flow.b");
+      endEnterpriseRun({ runId, status: "completed" });
+      expect(getEnterpriseRunRecord(runId)?.plan.activeNodeId).toBe("flow.b");
+    });
+  });
+
+  it("keeps mediation timeline-free for runtimes that never advance (CLI/ACP)", async () => {
+    await withFlowTree(() => {
+      const runId = nextRunId();
+      // No step-loop hook runs, so no node events should be emitted and the run
+      // stays on the root scope rather than claiming a leaf it never reached.
+      beginEnterpriseRun({ runId, prompt: "run the flowtest now" });
+      endEnterpriseRun({ runId, status: "completed" });
+
+      const record = getEnterpriseRunRecord(runId);
+      const kinds = listEnterpriseRunEvents(record?.executionId ?? "").map((event) => event.kind);
+      expect(kinds).toEqual(["run.started", "run.ended"]);
+      expect(record?.plan.activeNodeId).toBe("flow");
+    });
   });
 });

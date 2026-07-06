@@ -269,6 +269,7 @@ import {
 } from "../compaction-successor-transcript.js";
 import { runContextEngineMaintenance } from "../context-engine-maintenance.js";
 import { applyFinalEffectiveToolPolicy } from "../effective-tool-policy.js";
+import { installEnterpriseStepLoopHook } from "../enterprise-step-loop.js";
 import { buildEmbeddedExtensionFactories } from "../extensions.js";
 import {
   applyExtraParamsToAgent,
@@ -2723,6 +2724,17 @@ export async function runEmbeddedAttempt(
       removeToolResultContextGuard = () => {
         removeHistoryImagePruneContextTransform();
         removeLoopContextGuard?.();
+      };
+      // Advance the enterprise workflow step once per turn (no-op unless this
+      // run is bound to a governed workflow tree).
+      const removeEnterpriseStepLoopHook = installEnterpriseStepLoopHook({
+        agent: activeSession.agent,
+        runId: params.runId,
+      });
+      const removeContextGuardsBeforeEnterpriseStep = removeToolResultContextGuard;
+      removeToolResultContextGuard = () => {
+        removeEnterpriseStepLoopHook();
+        removeContextGuardsBeforeEnterpriseStep?.();
       };
       const cacheTrace = createCacheTrace({
         cfg: params.config,

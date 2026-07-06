@@ -85,6 +85,8 @@ const RUN_EVENT_KINDS: readonly EnterpriseRunEventKind[] = [
   "run.started",
   "run.ended",
   "governance.decision",
+  "node.entered",
+  "node.completed",
 ];
 
 function requireSqliteNumber(value: number | bigint): number {
@@ -185,6 +187,28 @@ export function appendEnterpriseRunEvent(
         payload_json: JSON.stringify(event.payload),
         created_at: event.createdAt,
       }),
+    );
+  }, stateDatabaseOptions(options));
+}
+
+/**
+ * Re-persist plan_json after an in-run mutation. Only the active node advances
+ * during a run, so this keeps `enterprise runs show` and the JSON trace
+ * reporting the current step instead of the run-start root snapshot.
+ */
+export function updateEnterpriseRunPlan(
+  params: { executionId: string; plan: EnterpriseRunPlan; now?: number },
+  options: EnterpriseTraceStoreOptions = {},
+): void {
+  const now = params.now ?? Date.now();
+  runOpenClawStateWriteTransaction((database) => {
+    const stateDb = getNodeSqliteKysely<EnterpriseTraceDatabase>(database.db);
+    executeSqliteQuerySync(
+      database.db,
+      stateDb
+        .updateTable("enterprise_runs")
+        .set({ plan_json: JSON.stringify(params.plan), updated_at: now })
+        .where("execution_id", "=", params.executionId),
     );
   }, stateDatabaseOptions(options));
 }
