@@ -276,6 +276,8 @@
           - "src/commands/enterprise*.ts"
           - "src/config/zod-schema.enterprise*.ts"
           - "docs/cli/enterprise.md"
+          - "docs/concepts/clawworks-enterprise.md"
+          - "examples/enterprise/**"
 
 "security":
   - changed-files:

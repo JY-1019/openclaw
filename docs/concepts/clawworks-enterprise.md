@@ -92,6 +92,15 @@ Imported trees override built-in trees with the same id; removing the import
 restores the built-in. A running gateway loads trees at startup, so restart it
 after imports or removals.
 
+A fuller example with a complete ontology (entities, relationships, actions,
+constraints, and tool/knowledge scopes across a multi-step tree) lives in the
+source repository at `examples/enterprise/incident-response.clawworks.yaml`. From
+a source checkout, import it with:
+
+```bash
+pnpm openclaw enterprise trees import examples/enterprise/incident-response.clawworks.yaml
+```
+
 ### Ontology bindings
 
 Each node carries executable metadata in its `ontology`:

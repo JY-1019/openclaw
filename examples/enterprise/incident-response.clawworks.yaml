@@ -1,0 +1,108 @@
+# ClawWorks example workflow tree with a full ontology.
+#
+# Import it from a source checkout with:
+#   pnpm openclaw enterprise trees import examples/enterprise/incident-response.clawworks.yaml
+#
+# The root and each step carry an ontology: entities + directed relationships
+# (an ontology graph), actions bound to tools, constraints, tool scopes, and
+# knowledge foundations. Runtime governance enforces the tool/knowledge scopes;
+# the entities/relationships document the domain the step reasons about.
+schema: clawworks.workflow-tree
+schemaVersion: 1
+id: acme.incident-response
+version: 1.0.0
+name: Incident response
+description: Triage, diagnose, and resolve production incidents under governance.
+match:
+  # Keywords are matched as case-insensitive substrings, so keep them specific
+  # (avoid short/common fragments like "page" or "alert" that hijack unrelated
+  # requests such as "summarize this web page").
+  keywords: [incident, outage, sev1]
+  triggers: [user, system]
+  priority: 20
+root:
+  id: incident
+  title: Incident response
+  description: End-to-end handling of a reported production incident.
+  ontology:
+    entities:
+      - { id: incident, description: A reported production incident }
+      - { id: service, description: An affected service or component }
+      - { id: runbook, description: A documented recovery procedure }
+    relationships:
+      - id: incident-affects-service
+        from: incident
+        to: service
+        description: The incident degrades a service
+      - id: runbook-recovers-service
+        from: runbook
+        to: service
+        description: The runbook restores the service
+    contextHints:
+      - Record the incident id and affected service in every update.
+    constraints:
+      - id: no-prod-delete
+        description: Never delete or drop production data.
+    # Root scope is inherited by every step and is the backstop for runtimes
+    # that stay on the root (CLI/ACP do not advance into child steps). Keep it a
+    # superset of the child scopes so children narrow within it; without it,
+    # root-scoped runs would fall back to allow-all.
+    allowedTools: [memory_search, knowledge_search, exec, process, message]
+    knowledgeFoundations: [acme.runbooks]
+  children:
+    - id: incident.triage
+      title: Triage the alert
+      description: Classify severity and identify the affected service.
+      ontology:
+        actions:
+          - id: search-history
+            description: Look up prior incidents and runbooks
+            tools: [memory_search, knowledge_search]
+        allowedTools: [memory_search, knowledge_search]
+        knowledgeFoundations: [acme.runbooks]
+        expectedOutput: A severity classification and the affected service.
+        audit: true
+    - id: incident.diagnose
+      title: Diagnose the root cause
+      description: Inspect logs and metrics to find the cause, read-only.
+      ontology:
+        entities:
+          - { id: metric, description: A monitored signal such as latency or error rate }
+        relationships:
+          - id: metric-signals-incident
+            from: metric
+            to: incident
+            description: A metric anomaly signals the incident
+        actions:
+          - id: inspect-diagnostics
+            description: Inspect diagnostics without mutating state
+            tools: [exec]
+        allowedTools: [exec, memory_search, knowledge_search]
+        deniedTools: [process]
+        knowledgeFoundations: [acme.runbooks]
+        constraints:
+          - id: read-only-diagnosis
+            description: Diagnosis is read-only; do not restart or mutate services.
+        audit: true
+    - id: incident.remediate
+      title: Apply remediation
+      description: Execute the runbook step that recovers the service.
+      ontology:
+        actions:
+          - id: run-runbook
+            description: Apply a recovery action from the runbook
+            tools: [exec, process]
+        allowedTools: [exec, process, message]
+        # Human approval for high-risk remediation is NOT a tree constraint
+        # (constraints are prompt guidance only). Enforce it with a config
+        # governance policy, e.g. under enterprise.governance.policies:
+        #   { id: approve-remediation, effect: require_approval,
+        #     nodes: ["incident.remediate"], tools: ["exec", "process"] }
+        expectedOutput: A remediation summary and the restored service state.
+        audit: true
+    - id: incident.report
+      title: Report and close
+      description: Summarize the incident and notify stakeholders.
+      ontology:
+        allowedTools: [message, memory_search]
+        expectedOutput: A postmortem-ready incident summary.
