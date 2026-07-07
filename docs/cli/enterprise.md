@@ -44,4 +44,7 @@ plan nodes, and the trace event log (run lifecycle plus governance
 decisions per workflow node).
 
 Enterprise mode is configured through the `enterprise` config section
-(`mode: enforce | observe | off`, plus `governance.policies`).
+(`mode: enforce | observe | off`, plus `governance.policies`). See
+[ClawWorks Enterprise](/concepts/clawworks-enterprise) for the full model:
+workflow trees, ontology bindings, governance policies, and knowledge
+foundations.

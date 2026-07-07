@@ -1210,5 +1210,17 @@
   {
     "source": "Enterprise",
     "target": "企业"
+  },
+  {
+    "source": "Lightrag plugin",
+    "target": "Lightrag 插件"
+  },
+  {
+    "source": "ClawWorks Enterprise",
+    "target": "ClawWorks 企业"
+  },
+  {
+    "source": "LightRAG knowledge plugin",
+    "target": "LightRAG 知识插件"
   }
 ]
