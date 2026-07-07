@@ -1,0 +1,15 @@
+{
+  "name": "@openclaw/lightrag-plugin",
+  "version": "2026.6.10",
+  "private": true,
+  "description": "OpenClaw LightRAG knowledge foundation plugin for ClawWorks enterprise knowledge_search.",
+  "type": "module",
+  "devDependencies": {
+    "@openclaw/plugin-sdk": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

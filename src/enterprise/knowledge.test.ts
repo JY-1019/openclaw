@@ -198,6 +198,35 @@ describe("resolveEnterpriseKnowledge", () => {
     expect(result.snippets).toHaveLength(1);
   });
 
+  it("skips a foundation whose adapter throws, without failing the whole retrieval", async () => {
+    registerEnterpriseActiveRun(run({}));
+    registerEnterpriseKnowledgeFoundation("acme.down", {
+      retrieve: async () => {
+        throw new Error("server unreachable");
+      },
+    });
+    registerEnterpriseKnowledgeFoundation("acme.up", foundation("refund window"));
+
+    const result = await resolveEnterpriseKnowledge({ runId: "run-k", query: "refund" });
+    expect(result.snippets.map((snippet) => snippet.foundationId)).toEqual(["acme.up"]);
+    // The model-facing reason is sanitized (raw error detail is logged out-of-band).
+    expect(result.skipped).toEqual([{ foundationId: "acme.down", reason: "retrieval failed" }]);
+  });
+
+  it("propagates the error when the run is aborted mid-retrieval", async () => {
+    registerEnterpriseActiveRun(run({}));
+    const controller = new AbortController();
+    registerEnterpriseKnowledgeFoundation("acme.kb", {
+      retrieve: async () => {
+        controller.abort();
+        throw new Error("aborted");
+      },
+    });
+    await expect(
+      resolveEnterpriseKnowledge({ runId: "run-k", query: "refund", signal: controller.signal }),
+    ).rejects.toThrow(/aborted/);
+  });
+
   it("records but does not skip denials in observe mode", async () => {
     const events: SinkEvent[] = [];
     registerEnterpriseActiveRun(

@@ -43,6 +43,7 @@ const EXPECTED_BUNDLED_STARTUP_PLUGIN_IDS = [
   "diffs-language-pack",
   "file-transfer",
   "google-meet",
+  "lightrag",
   "llm-task",
   "lobster",
   "memory-wiki",

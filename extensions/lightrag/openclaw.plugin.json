@@ -1,0 +1,48 @@
+{
+  "id": "lightrag",
+  "name": "LightRAG Knowledge",
+  "description": "Registers LightRAG servers as ClawWorks enterprise knowledge foundations for knowledge_search.",
+  "activation": {
+    "onStartup": true
+  },
+  "enabledByDefault": false,
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "foundations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "serverUrl"],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Knowledge foundation id referenced by ontology.knowledgeFoundations."
+            },
+            "serverUrl": {
+              "type": "string",
+              "description": "Base URL of the LightRAG API server (e.g. http://localhost:9621)."
+            },
+            "apiKey": {
+              "type": ["string", "object"],
+              "description": "LightRAG API key (X-API-Key). A string or an OpenClaw secret reference."
+            },
+            "mode": {
+              "type": "string",
+              "enum": ["local", "global", "hybrid", "naive", "mix", "bypass"],
+              "description": "LightRAG retrieval mode (default: mix)."
+            }
+          }
+        }
+      }
+    }
+  },
+  "configContracts": {
+    "secretInputs": {
+      "bundledDefaultEnabled": false,
+      "paths": [{ "path": "foundations.*.apiKey", "expected": "string" }]
+    }
+  }
+}

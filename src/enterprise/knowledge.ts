@@ -9,12 +9,15 @@
  * `plugin-sdk/enterprise-knowledge-host` facade, or directly by tests/examples;
  * the registry is import-light so agent hot paths stay cheap.
  */
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { evaluateKnowledgeRetrievalGovernance } from "./governance.js";
 import { findPlanNode, resolvePlanNodePath } from "./plan.js";
 import { getEnterpriseActiveRun, type EnterpriseRunTraceSink } from "./runtime.js";
 import type { EnterprisePlanNode, KnowledgeFoundationAdapter, KnowledgeSnippet } from "./types.js";
 
 const DEFAULT_KNOWLEDGE_LIMIT = 5;
+
+const log = createSubsystemLogger("enterprise");
 
 // Symbol-keyed global so duplicated dist chunks share one registry (same
 // pattern as the enterprise active-run registry).
@@ -159,15 +162,30 @@ export async function resolveEnterpriseKnowledge(params: {
     if (!adapter) {
       continue;
     }
-    const results = await adapter.retrieve({
-      foundationId,
-      query: params.query,
-      limit,
-      ...(params.signal ? { signal: params.signal } : {}),
-    });
-    // Cap at the host boundary: a misbehaving adapter must not exceed the
-    // advertised per-foundation limit in the model-facing output.
-    snippets.push(...results.slice(0, limit));
+    try {
+      const results = await adapter.retrieve({
+        foundationId,
+        query: params.query,
+        limit,
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
+      // Cap at the host boundary: a misbehaving adapter must not exceed the
+      // advertised per-foundation limit in the model-facing output.
+      snippets.push(...results.slice(0, limit));
+    } catch (err) {
+      // One foundation's failure (e.g. a down server) skips that foundation
+      // rather than failing the whole tool call — but run cancellation still
+      // propagates so an aborted run stops instead of masking the abort.
+      if (params.signal?.aborted) {
+        throw err;
+      }
+      // Keep raw adapter errors (which may carry urls/paths/credentials) out of
+      // the model-facing skipped reason; log the detail out-of-band.
+      log.warn(
+        `enterprise knowledge foundation "${foundationId}" retrieval failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      skipped.push({ foundationId, reason: "retrieval failed" });
+    }
   }
   return { snippets, skipped, mediated: true };
 }
