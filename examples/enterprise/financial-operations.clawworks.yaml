@@ -7,16 +7,15 @@
 # --------------------
 # This is the route-finding fixture. One tree, 40 nodes, depth 5.
 #
-# CURRENT BEHAVIOR (read this before drawing conclusions from a run): the runtime
-# still plans the WHOLE selected subtree — buildEnterpriseRunPlan flattens the
-# tree root and the step loop advances through every leaf. Subtree route
-# selection is not implemented yet. So today this tree exercises the ontology,
-# the governance scopes, and the Enterprise-tab visualization at realistic scale;
-# it does NOT yet prove that a narrow route was chosen.
+# CURRENT BEHAVIOR: the route planner selects cut points and the run plans exactly
+# their subtrees plus the ancestors above them (selectWorkflowRoute →
+# resolveRouteNodeIds → buildEnterpriseRunPlan). Ancestors are kept on purpose:
+# governance merges every ontology down the root→active path, so dropping one
+# would drop the tool ceiling it declares. A planner that has no opinion, times
+# out, or fails falls back to the whole tree — less precise, never less governed.
 #
-# It is shaped for that upcoming route planner: the point of a 40-node tree is
-# that picking the right subtree is a real problem, so it is seeded with
-# deliberately confusable siblings and cross-domain traps:
+# The point of a 40-node tree is that picking the right subtree is a real problem,
+# so it is seeded with deliberately confusable siblings and cross-domain traps:
 #
 #   finops.risk.monitoring.alert-triage   vs  finops.claims.intake.triage
 #   finops.risk.underwriting.decision     vs  finops.claims.adjudication.decision
@@ -34,8 +33,16 @@
 # primaryKey each) and link types with cardinality. Every step below operates ON
 # that ontology — leaf nodes declare action types whose `effects` name exactly
 # which object type they read, create, update, or delete, and bind those actions
-# to concrete tools. Governance can then scope a policy at the action level and
-# it means something enforceable, not just a naming convention.
+# to concrete tools.
+#
+# WHAT IS ACTUALLY ENFORCED TODAY (do not read more into the fields than this):
+# only `allowedTools`/`deniedTools` (an independent gate at every node on the
+# root→active path), `knowledgeFoundations`, and `audit`. An action-scoped policy
+# resolves through the action's `tools` globs. The semantic fields below —
+# property types, primaryKey, cardinality, action `parameters`, `preconditions`,
+# `effects`, and `constraints` — are validated on import and rendered into the
+# prompt digest and the Enterprise tab, but nothing gates on their VALUES yet.
+# Treat `preconditions` and `constraints` as advice to the model, not invariants.
 schema: clawworks.workflow-tree
 schemaVersion: 1
 id: acme.financial-operations
