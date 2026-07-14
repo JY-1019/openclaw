@@ -734,17 +734,30 @@ root:
                 ALERTS. This one triages CLAIMS against a policy.
               ontology:
                 actions:
+                  # The `effects` below are this action's AUTHORIZATION, not a
+                  # description of it. invoke_action may only touch the object types
+                  # they name, in the way they name: this one can update a claim and
+                  # read a policy, and it cannot delete anything or touch a document.
+                  #
+                  # Parameters map to properties by id: `status` is a property of
+                  # `claim`, so it is written; `claim-id` is claim's primaryKey, so it
+                  # says WHICH claim; `rationale` matches no property, so it is the
+                  # operator's evidence and lands in the audit trail instead.
                   - id: triage-claim
                     title: Triage claim
-                    tools: [knowledge_search, memory_search]
                     parameters:
                       - { id: claim-id, type: id, required: true }
+                      - { id: status, type: string, required: true }
+                      - { id: rationale, type: string, required: true }
+                    preconditions:
+                      - Compute the claim's triage band before setting its status.
                     effects:
-                      - { entity: claim, kind: update, description: Sets claim.status to adjudicating. }
+                      - { entity: claim, kind: update, description: Sets claim.status. }
                       - { entity: policy, kind: read }
                 # This step works ON the object graph: it searches claims, walks to
-                # the policy they are filed against, and computes the triage band —
-                # rather than being told about them in prose.
+                # the policy they are filed against, computes the triage band, and
+                # writes the outcome back through a declared action — rather than
+                # being told about any of it in prose.
                 allowedTools:
                   [
                     knowledge_search,
@@ -752,6 +765,7 @@ root:
                     search_objects,
                     get_neighbors,
                     compute_function,
+                    invoke_action,
                   ]
                 knowledgeFoundations: [acme.claims-handbook]
                 expectedOutput: The claim's class and where it is routed next.

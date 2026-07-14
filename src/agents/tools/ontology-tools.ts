@@ -16,8 +16,10 @@ import { Type } from "typebox";
 import {
   getOntologyNeighbors,
   getOntologyObject,
+  runOntologyObjectWrite,
   searchOntologyObjects,
 } from "../../enterprise/object-store.sqlite.js";
+import { invokeOntologyAction } from "../../enterprise/ontology-actions.js";
 import {
   evaluateOntologyExpression,
   ontologyExpressionProperties,
@@ -28,7 +30,8 @@ import {
   primaryKeyOf,
   resolveActiveOntologyScope,
 } from "../../enterprise/ontology-runtime.js";
-import type { OntologyEntity } from "../../enterprise/types.js";
+import { recordEnterpriseActionInvoked } from "../../enterprise/runtime.js";
+import type { OntologyEntity, OntologyValue } from "../../enterprise/types.js";
 import {
   asToolParamsRecord,
   jsonResult,
@@ -277,6 +280,81 @@ export function createComputeFunctionTool(opts: { runId: string }): AnyAgentTool
         objectId,
         returns: fn.returns,
         value: evaluated.value,
+      });
+    },
+  };
+}
+
+const InvokeActionSchema = Type.Object({
+  action: Type.String({
+    description: "Action id to run, as declared by the current workflow step.",
+  }),
+  args: Type.Optional(
+    Type.Object(
+      {},
+      {
+        additionalProperties: true,
+        description:
+          "The action's declared parameters, by id. The parameter matching an affected object type's primary key identifies the object to write.",
+      },
+    ),
+  ),
+});
+
+/**
+ * The write tool. Its effects are the authorization: it may only touch the object
+ * types the action's `effects` name, only in the way they name, and only from a
+ * step that declares the action. Governance sees the ACTION (not just the tool),
+ * so a policy scoped to one action can deny or require approval for exactly that
+ * one.
+ */
+export function createInvokeActionTool(opts: { runId: string }): AnyAgentTool {
+  return {
+    label: "Ontology",
+    name: "invoke_action",
+    description:
+      "Run an action declared by the current workflow step. Writes to the objects the action's effects name.",
+    parameters: InvokeActionSchema,
+    execute: async (_toolCallId, params) => {
+      const scope = resolveActiveOntologyScope(opts.runId);
+      if (!scope) {
+        return unmediated();
+      }
+      const record = asToolParamsRecord(params);
+      const actionId = readStringParam(record, "action", { required: true });
+      const rawArgs = record.args;
+      if (rawArgs !== undefined && (typeof rawArgs !== "object" || rawArgs === null)) {
+        return jsonResult({
+          error: '"args" must be an object of the action\'s declared parameters',
+        });
+      }
+      const args = (rawArgs ?? {}) as Record<string, OntologyValue>;
+
+      const action = scope.actions.get(actionId);
+      if (!action) {
+        // An action the step does not declare is not performable here, whatever
+        // the model inferred. This is the ontology's own boundary.
+        return jsonResult({
+          error: outOfScopeMessage("action", actionId, scope.actions.keys()),
+        });
+      }
+
+      const result = runOntologyObjectWrite((database) =>
+        invokeOntologyAction(database, { scope, action, args }),
+      );
+      if (!result.ok) {
+        return jsonResult({ error: result.error });
+      }
+      // The governance decision recorded that the call was ALLOWED; this records
+      // what it did. Without it the trail cannot say which object changed.
+      recordEnterpriseActionInvoked(opts.runId, {
+        actionId: action.id,
+        writes: result.writes,
+        context: result.unmappedParameters,
+      });
+      return jsonResult({
+        action: action.id,
+        writes: result.writes,
       });
     },
   };

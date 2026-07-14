@@ -23,8 +23,15 @@ describe("enterprise tools are known to the factory allowlist", () => {
     // every one of them must resolve to includeOpenClawTools.
     // CORE_TOOL_GROUPS is built by spreading a Map, so its inferred type only
     // names the one literal key; widen to read the generated section groups.
+    //
+    // BOTH enterprise groups: the ontology WRITE tool lives in its own group so it
+    // cannot ride into an allowlist that already says `group:enterprise`, and the
+    // guard has to follow it there or the tool it most matters for goes unchecked.
     const groups: Record<string, readonly string[] | undefined> = CORE_TOOL_GROUPS;
-    const enterpriseTools = groups["group:enterprise"] ?? [];
+    const enterpriseTools = [
+      ...(groups["group:enterprise"] ?? []),
+      ...(groups["group:enterprise-write"] ?? []),
+    ];
     expect(enterpriseTools.length).toBeGreaterThan(0);
     for (const toolId of enterpriseTools) {
       const plan = resolveEmbeddedAttemptToolConstructionPlan({ toolsAllow: [toolId] });

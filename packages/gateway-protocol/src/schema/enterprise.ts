@@ -434,6 +434,7 @@ export const EnterpriseRunEventKindSchema = Type.Union([
   Type.Literal("governance.decision"),
   Type.Literal("node.entered"),
   Type.Literal("node.completed"),
+  Type.Literal("action.invoked"),
 ]);
 
 /** One trace event in an execution timeline. */

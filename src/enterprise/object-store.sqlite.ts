@@ -305,6 +305,30 @@ export function deleteOntologyObjectsForTree(
   );
 }
 
+/**
+ * Read one object THROUGH an open write transaction.
+ *
+ * A write path must check existence on the same handle it writes to: reading the
+ * process-default database instead would make a valid update look missing (or a
+ * create collide) whenever the transaction runs against another state DB.
+ */
+export function getOntologyObjectIn(
+  database: OpenClawStateDatabase,
+  params: { treeId: string; entity: EnterpriseId; objectId: string },
+): OntologyObjectRecord | null {
+  const stateDb = getNodeSqliteKysely<EnterpriseObjectDatabase>(database.db);
+  const row = executeSqliteQueryTakeFirstSync(
+    database.db,
+    stateDb
+      .selectFrom("enterprise_ontology_objects")
+      .selectAll()
+      .where("tree_id", "=", params.treeId)
+      .where("entity_id", "=", params.entity)
+      .where("object_id", "=", params.objectId),
+  ) as ObjectRow | undefined;
+  return row ? rowToObject(row) : null;
+}
+
 /** Read one object by identity (null when absent). */
 export function getOntologyObject(
   params: { treeId: string; entity: EnterpriseId; objectId: string },

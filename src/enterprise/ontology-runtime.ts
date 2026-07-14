@@ -19,6 +19,8 @@ import type {
   OntologyEntity,
   OntologyFunction,
   OntologyRelationship,
+  WorkflowNodeDefinition,
+  WorkflowTreeDefinition,
 } from "./types.js";
 
 export type NodeOntologyScope = {
@@ -30,6 +32,17 @@ export type NodeOntologyScope = {
   relationships: Map<EnterpriseId, OntologyRelationship>;
   actions: Map<EnterpriseId, OntologyAction>;
   functions: Map<EnterpriseId, OntologyFunction>;
+  /**
+   * Required property ids per object type, gathered TREE-WIDE rather than along
+   * the path.
+   *
+   * Objects are stored tree-wide, so a create from one branch must satisfy the
+   * shape every branch declares: if a sibling marks a property required, an
+   * object created without it violates its own type the moment that sibling reads
+   * it. This is used ONLY to reject an incomplete create — never to read or return
+   * a value — so it cannot leak a sibling's data.
+   */
+  treeRequiredProperties: Map<EnterpriseId, Set<string>>;
 };
 
 /**
@@ -57,6 +70,11 @@ export function resolveActiveOntologyScope(runId: string): NodeOntologyScope | n
     relationships: new Map(),
     actions: new Map(),
     functions: new Map(),
+    // Snapshotted when the run was mediated, from the tree it PLANNED against. A
+    // per-call registry lookup would drift: a re-import mid-run invalidates the
+    // registry, and the run would start judging creates against a tree version it
+    // never planned or prompted against.
+    treeRequiredProperties: run.treeRequiredProperties ?? new Map(),
   };
   // Root first, so a deeper node's redeclaration of the same id wins.
   for (const step of resolvePlanNodePath(run.plan, node.nodeId)) {
@@ -138,6 +156,41 @@ export function runDeclaresOntology(runId: string): boolean {
     (node) =>
       (node.ontology.entities?.length ?? 0) > 0 || (node.ontology.functions?.length ?? 0) > 0,
   );
+}
+
+/**
+ * Required property ids per object type, across the WHOLE TREE.
+ *
+ * Taken from the tree DEFINITION, not from plan.nodes: a routed run plans only the
+ * nodes on its route, so a pruned sibling's `required` declaration would be
+ * invisible — and an object created here without that property would violate its
+ * own type the moment a future run on that sibling reads it.
+ *
+ * Captured once, when the run is mediated, and carried on the active run. Looking
+ * it up per call would drift: a re-import mid-run invalidates the registry, and
+ * the run would start judging creates against a tree it never planned against.
+ */
+export function collectTreeRequiredProperties(
+  tree: WorkflowTreeDefinition,
+): Map<EnterpriseId, Set<string>> {
+  const required = new Map<EnterpriseId, Set<string>>();
+  const walk = (node: WorkflowNodeDefinition): void => {
+    for (const entity of node.ontology?.entities ?? []) {
+      for (const property of entity.properties ?? []) {
+        if (!property.required) {
+          continue;
+        }
+        const existing = required.get(entity.id) ?? new Set<string>();
+        existing.add(property.id);
+        required.set(entity.id, existing);
+      }
+    }
+    for (const child of node.children ?? []) {
+      walk(child);
+    }
+  };
+  walk(tree.root);
+  return required;
 }
 
 /** The object type's identifying property, or null when it declares none. */

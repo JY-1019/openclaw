@@ -50,7 +50,9 @@ describe("tool mutation helpers", () => {
   ])("treats read-only shell command as non-mutating: %s %s", (toolName, command) => {
     expect(isMutatingToolCall(toolName, { command })).toBe(false);
     expect(buildToolMutationState(toolName, { command }).mutatingAction).toBe(false);
-    expect(buildToolMutationState(toolName, { command }, command).actionFingerprint).toBeUndefined();
+    expect(
+      buildToolMutationState(toolName, { command }, command).actionFingerprint,
+    ).toBeUndefined();
   });
 
   it.each([
@@ -425,5 +427,47 @@ describe("tool mutation helpers", () => {
     expect(isLikelyMutatingToolName("browser_actions")).toBe(true);
     expect(isLikelyMutatingToolName("message_slack")).toBe(true);
     expect(isLikelyMutatingToolName("browser")).toBe(false);
+  });
+});
+
+describe("invoke_action fingerprints its object target", () => {
+  it("distinguishes the same action on different objects", () => {
+    // invoke_action carries its target inside a NESTED `args` object, so the
+    // top-level target aliases see nothing. Without the args in the fingerprint, a
+    // FAILED write on one claim would be cleared by a SUCCESSFUL write on another.
+    const one = buildToolMutationState("invoke_action", {
+      action: "triage-claim",
+      args: { "claim-id": "C-1", status: "adjudicating" },
+    });
+    const two = buildToolMutationState("invoke_action", {
+      action: "triage-claim",
+      args: { "claim-id": "C-2", status: "adjudicating" },
+    });
+    expect(one.mutatingAction).toBe(true);
+    expect(one.replaySafe).toBe(false);
+    expect(one.actionFingerprint).not.toBe(two.actionFingerprint);
+
+    // ...and the SAME call always fingerprints the same, whatever the key order.
+    const reordered = buildToolMutationState("invoke_action", {
+      action: "triage-claim",
+      args: { status: "adjudicating", "claim-id": "C-1" },
+    });
+    expect(reordered.actionFingerprint).toBe(one.actionFingerprint);
+  });
+
+  it("distinguishes objects whose primary key does not look like an id", () => {
+    // A key is only a key by DECLARATION: "claim-id", but equally "ticket-no".
+    // Guessing identity by name would fail OPEN here — a failed write on ticket 7
+    // cleared by a successful write on ticket 8 — and this file's rule for
+    // mutating flows is to fail CLOSED.
+    const seven = buildToolMutationState("invoke_action", {
+      action: "open-ticket",
+      args: { "ticket-no": 7 },
+    });
+    const eight = buildToolMutationState("invoke_action", {
+      action: "open-ticket",
+      args: { "ticket-no": 8 },
+    });
+    expect(seven.actionFingerprint).not.toBe(eight.actionFingerprint);
   });
 });

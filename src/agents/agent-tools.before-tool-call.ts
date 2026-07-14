@@ -10,7 +10,9 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ToolLoopDetectionConfig } from "../config/types.tools.js";
 import {
   evaluateEnterpriseToolCall,
+  readInvokedActionId,
   recordEnterpriseApprovalResolution,
+  toolCarriesOntologyAction,
 } from "../enterprise/runtime.js";
 import {
   diagnosticErrorCategory,
@@ -1143,10 +1145,33 @@ export async function runBeforeToolCallHook(args: RunBeforeToolCallHookArgs): Pr
   // Enterprise governance gate: runs for every mediated run before plugin
   // machinery so ontology/policy denials cannot be widened by plugin hooks.
   // Registry lookup by runId only — no config or definition re-resolution.
-  const enterpriseVerdict = evaluateEnterpriseToolCall({
+  //
+  // invoke_action carries the ontology ACTION it means, and that action — not the
+  // tool — is what an `actions`-scoped policy is about. Without it the gate sees
+  // only "invoke_action" and a policy scoped to one action would fire for every
+  // other action too.
+  //
+  // For invoke_action this pre-chain pass does NOT record: the chain can still
+  // rewrite the action, and an appended trace event cannot be retracted, so
+  // recording here could leave the trail claiming action A was allowed when
+  // action B is what ran. The authoritative, recorded decision is taken below on
+  // the final params. It still BLOCKS here, so a denial is never softened by
+  // running the plugin chain first.
+  const invokedActionId = readInvokedActionId(toolName, params);
+  // The action that will ACTUALLY run. A hook can rewrite or fill it in, and every
+  // decision AND every audit entry below must be about that one — recording the
+  // pre-hook id would tie an approval to an action the run never performed.
+  let effectiveActionId = invokedActionId;
+  // Keyed on the TOOL, not on whether an action arrived: a hook can FILL IN an
+  // action that was absent, and gating the re-check on "we saw one" would let
+  // exactly that case skip its action policy entirely.
+  const decideLater = toolCarriesOntologyAction(toolName);
+  let enterpriseVerdict = evaluateEnterpriseToolCall({
     ...(args.ctx?.runId ? { runId: args.ctx.runId } : {}),
     toolName,
     ...(args.toolCallId ? { toolCallId: args.toolCallId } : {}),
+    ...(invokedActionId !== undefined ? { actionId: invokedActionId } : {}),
+    ...(decideLater ? { record: false } : {}),
   });
   if (enterpriseVerdict?.blocked) {
     return {
@@ -1164,6 +1189,49 @@ export async function runBeforeToolCallHook(args: RunBeforeToolCallHookArgs): Pr
   // the caller's approvalMode (so the native pre-tool relay can defer it
   // within its own deadline instead of blocking on a synchronous request).
   const chainOutcome = await runBeforeToolCallChain(args);
+
+  // The chain can ADJUST params (trusted policy, plugin before_tool_call hook,
+  // approval override), and the adjusted params are what the tool executes. So the
+  // authoritative decision for an ontology action is taken HERE, on the final
+  // params, and this is the one that reaches the audit trail. Without it, a hook
+  // could slip past an action-scoped deny simply by renaming the action after the
+  // gate ran — precisely the widening this gate exists to prevent.
+  if (decideLater && !chainOutcome.blocked) {
+    const finalActionId = readInvokedActionId(toolName, chainOutcome.params ?? params);
+    const revised = evaluateEnterpriseToolCall({
+      ...(args.ctx?.runId ? { runId: args.ctx.runId } : {}),
+      toolName,
+      ...(args.toolCallId ? { toolCallId: args.toolCallId } : {}),
+      ...(finalActionId !== undefined ? { actionId: finalActionId } : {}),
+    });
+    if (revised?.blocked) {
+      // The chain may have produced a DEFERRED approval. A blocked outcome is
+      // never stored or resolved by the caller, so the deferral would dangle and
+      // its onResolution callback never fire — plugin cleanup and audit silently
+      // skipped. Cancel it, exactly as the conflicting-approval path below does.
+      if (chainOutcome.deferredApproval) {
+        cancelDeferredPluginToolApproval(chainOutcome.deferredApproval);
+      }
+      return {
+        blocked: true,
+        kind: "veto",
+        deniedReason: "enterprise-governance",
+        reason: revised.decision.reason,
+        params: chainOutcome.params ?? params,
+      };
+    }
+    // A rewritten action that needs approval is NOT vetoed: this runs after the
+    // chain produced its final params and before applyEnterpriseApproval, so the
+    // normal approval path can still prompt — on the final action. Failing closed
+    // here would silently turn every configured require_approval into a deny for
+    // any hook-filled or normalized action.
+    //
+    // Everything below decides approval, and must decide it for the action that
+    // will ACTUALLY run — including what it writes to the audit trail.
+    enterpriseVerdict = revised;
+    effectiveActionId = finalActionId;
+  }
+
   if (chainOutcome.blocked || !enterpriseVerdict?.requiresApproval) {
     // Chain already blocked, or no enterprise approval is required — return the
     // chain outcome verbatim (including any deferred approval it produced).
@@ -1180,6 +1248,7 @@ export async function runBeforeToolCallHook(args: RunBeforeToolCallHookArgs): Pr
       runId: args.ctx?.runId ?? "",
       verdict: enterpriseVerdict,
       toolName,
+      ...(effectiveActionId !== undefined ? { actionId: effectiveActionId } : {}),
       ...(args.toolCallId ? { toolCallId: args.toolCallId } : {}),
       outcome: "denied",
       resolution: "blocked-conflicting-approval",
@@ -1193,6 +1262,7 @@ export async function runBeforeToolCallHook(args: RunBeforeToolCallHookArgs): Pr
     };
   }
   return applyEnterpriseApproval({
+    ...(effectiveActionId !== undefined ? { actionId: effectiveActionId } : {}),
     args,
     toolName,
     verdict: enterpriseVerdict,
@@ -1207,10 +1277,12 @@ export async function runBeforeToolCallHook(args: RunBeforeToolCallHookArgs): Pr
 async function applyEnterpriseApproval(params: {
   args: RunBeforeToolCallHookArgs;
   toolName: string;
+  /** The ontology action this approval is about, when the call names one. */
+  actionId?: string;
   verdict: NonNullable<ReturnType<typeof evaluateEnterpriseToolCall>>;
   chainOutcome: Extract<HookOutcome, { blocked: false }>;
 }): Promise<HookOutcome> {
-  const { args, toolName, verdict, chainOutcome } = params;
+  const { args, toolName, actionId, verdict, chainOutcome } = params;
   const approvalSettings = verdict.decision.approval;
   const timeoutBehavior = approvalSettings?.timeoutBehavior ?? "deny";
   const enterpriseRunId = args.ctx?.runId ?? "";
@@ -1227,6 +1299,9 @@ async function applyEnterpriseApproval(params: {
       runId: enterpriseRunId,
       verdict,
       toolName,
+      // Which declared action a human approved or denied. Without it the trail
+      // shows "invoke_action was approved" and cannot say what was performed.
+      ...(actionId !== undefined ? { actionId } : {}),
       ...(args.toolCallId ? { toolCallId: args.toolCallId } : {}),
       outcome: approved ? "approved" : "denied",
       resolution,

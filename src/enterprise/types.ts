@@ -76,10 +76,21 @@ export type OntologyActionEffect = {
 };
 
 /**
- * Ontology action type: a named operation a step may perform, bound to concrete
- * tools and declaring what it reads/writes. Governance can scope policies at
- * this level (`actions` selector), so the effects are the contract that makes a
- * write-scoped policy meaningful rather than a naming convention.
+ * Ontology action type: a named operation a step may perform, declaring what it
+ * reads and writes.
+ *
+ * `effects` are the AUTHORIZATION, enforced by invoke_action: an action may only
+ * touch the object types they name, in the way they name. One declaring only
+ * `kind: read` cannot write at all. `parameters` are validated against the call,
+ * and a parameter whose id matches a property of an affected object type is what
+ * gets written to it.
+ *
+ * Governance scopes policies at this level (`actions` selector) against the
+ * action the model ACTUALLY invoked, so a policy pinned to one action denies or
+ * gates exactly that one.
+ *
+ * `preconditions` remain advisory: they are natural language, so they reach the
+ * model in the digest but nothing can enforce them. Do not read them as guarantees.
  */
 export type OntologyAction = {
   id: EnterpriseId;
@@ -383,4 +394,10 @@ export type EnterpriseRunEventKind =
   | "run.ended"
   | "governance.decision"
   | "node.entered"
-  | "node.completed";
+  | "node.completed"
+  /**
+   * An ontology action ran and wrote to the object store. The governance
+   * decision that PERMITTED it is a separate event; this one records what it
+   * actually did, which no other event captures.
+   */
+  | "action.invoked";

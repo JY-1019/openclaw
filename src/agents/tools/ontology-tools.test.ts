@@ -2,10 +2,16 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { runDeclaresOntology } from "../../enterprise/ontology-runtime.js";
+import {
+  collectTreeRequiredProperties,
+  resolveActiveOntologyScope,
+  runDeclaresOntology,
+} from "../../enterprise/ontology-runtime.js";
 import {
   clearEnterpriseActiveRunsForTest,
+  evaluateEnterpriseToolCall,
   registerEnterpriseActiveRun,
+  runAllowsOntologyWrites,
   type EnterpriseActiveRun,
 } from "../../enterprise/runtime.js";
 import { importWorkflowTreeContent } from "../../enterprise/tree-io.js";
@@ -16,6 +22,7 @@ import { captureEnv, setTestEnvValue } from "../../test-utils/env.js";
 import {
   createComputeFunctionTool,
   createGetNeighborsTool,
+  createInvokeActionTool,
   createSearchObjectsTool,
 } from "./ontology-tools.js";
 
@@ -86,7 +93,10 @@ const TREE = JSON.stringify({
         ontology: {
           entities: [
             { id: "payroll-record", properties: [{ id: "run-id", type: "id", primaryKey: true }] },
-            { id: "claim", properties: [{ id: "salary-note", type: "string" }] },
+            {
+              id: "claim",
+              properties: [{ id: "salary-note", type: "string", required: true }],
+            },
           ],
           relationships: [{ id: "claim-touches-payroll", from: "claim", to: "payroll-record" }],
         },
@@ -283,6 +293,31 @@ describe("the node boundary holds against sibling-branch data", () => {
   });
 });
 
+describe("tree-wide shape survives routing", () => {
+  it("sees a required property declared on a node the route pruned", async () => {
+    // A routed run plans only its route, so plan.nodes cannot be the source of the
+    // tree-wide required shape: a pruned sibling's `required` would be invisible,
+    // and an object created here without it would violate its own type the moment
+    // a future run on that sibling reads it. The registry has the FULL tree.
+    const run = activeRun("root.claims");
+    // Simulate a routed plan: the payroll branch is pruned out entirely.
+    run.plan.nodes = run.plan.nodes.filter((node) => node.nodeId !== "root.payroll");
+    // Mediation snapshots this from the FULL tree definition it planned against,
+    // not from the routed plan and not by re-reading the registry per call.
+    run.treeRequiredProperties = collectTreeRequiredProperties(
+      JSON.parse(TREE) as Parameters<typeof collectTreeRequiredProperties>[0],
+    );
+    registerEnterpriseActiveRun(run);
+
+    const scope = resolveActiveOntologyScope(RUN_ID);
+    if (!scope) {
+      throw new Error("expected a scope");
+    }
+    // salary-note is required on the PRUNED payroll branch (see TREE).
+    expect(scope.treeRequiredProperties.get("claim")?.has("salary-note")).toBe(true);
+  });
+});
+
 describe("entity merging along the path", () => {
   it("keeps an ancestor's primaryKey when a child extends the object type", async () => {
     // An object type is TREE-scoped: a child may add properties to one its
@@ -355,7 +390,130 @@ describe("entity merging along the path", () => {
   });
 });
 
+describe("invoke_action", () => {
+  it("is DENIED BY GOVERNANCE when the active step did not opt into writes", () => {
+    // Exposure is plan-level (the tool list must not change mid-run), but
+    // PERMISSION is path-level — and it is GOVERNANCE, decided before any policy
+    // or approval runs. Deciding it in the tool instead would let a non-opted step
+    // prompt a human for approval and record it, only for the tool to refuse the
+    // call anyway.
+    const run = activeRun("root.claims");
+    const payroll = run.plan.nodes.find((node) => node.nodeId === "root.payroll");
+    if (!payroll) {
+      throw new Error("expected the payroll node");
+    }
+    // The SIBLING opts in; the active claims branch does not.
+    payroll.ontology = { allowedTools: ["invoke_action"] };
+    registerEnterpriseActiveRun(run);
+    expect(runAllowsOntologyWrites(RUN_ID)).toBe(true);
+
+    const verdict = evaluateEnterpriseToolCall({
+      runId: RUN_ID,
+      toolName: "invoke_action",
+      actionId: "anything",
+    });
+    expect(verdict?.blocked).toBe(true);
+    expect(verdict?.decision.reason).toContain("does not allow ontology writes");
+  });
+
+  it("refuses an action the workflow step does not declare", async () => {
+    // The step's declared actions ARE what it may do. An action it never declared
+    // is not performable here, whatever the model inferred from the prompt.
+    const run = activeRun("root.claims");
+    const claims = run.plan.nodes.find((node) => node.nodeId === "root.claims");
+    if (!claims) {
+      throw new Error("expected the claims node");
+    }
+    claims.ontology = { allowedTools: ["invoke_action"] };
+    registerEnterpriseActiveRun(run);
+    const details = await call(createInvokeActionTool({ runId: RUN_ID }), {
+      action: "wire-the-money",
+      args: { "claim-id": "C-1" },
+    });
+    expect(details.error).toContain("not in the ontology of this workflow step");
+    expect(details.writes).toBeUndefined();
+  });
+
+  it("reports an unmediated run rather than writing anything", async () => {
+    const details = await call(createInvokeActionTool({ runId: "no-such-run" }), {
+      action: "anything",
+    });
+    expect(details.error).toContain("not governed by a workflow tree");
+  });
+});
+
 describe("tool exposure", () => {
+  it("withholds the WRITE tool unless a node explicitly allows it", () => {
+    // An omitted allowedTools means allow-all, so an existing tree that declares
+    // actions but scopes no tools would silently gain object-store writes on
+    // upgrade — from effects that until now were only validated and rendered.
+    const run = activeRun("root.claims");
+    registerEnterpriseActiveRun(run);
+    expect(runDeclaresOntology(RUN_ID)).toBe(true);
+    expect(runAllowsOntologyWrites(RUN_ID)).toBe(false);
+    clearEnterpriseActiveRunsForTest();
+
+    const optedIn = activeRun("root.claims");
+    const claims = optedIn.plan.nodes.find((node) => node.nodeId === "root.claims");
+    if (!claims) {
+      throw new Error("expected the claims node");
+    }
+    claims.ontology = { allowedTools: ["search_objects", "invoke_action"] };
+    registerEnterpriseActiveRun(optedIn);
+    expect(runAllowsOntologyWrites(RUN_ID)).toBe(true);
+  });
+
+  it("accepts an opt-in whatever its casing", () => {
+    // The ontology scope gate normalizes tool names, so an exact-string check here
+    // would deny writes for a step that explicitly allowed the tool.
+    const run = activeRun("root.claims");
+    const claims = run.plan.nodes.find((node) => node.nodeId === "root.claims");
+    if (!claims) {
+      throw new Error("expected the claims node");
+    }
+    claims.ontology = { allowedTools: [" INVOKE_ACTION "] };
+    registerEnterpriseActiveRun(run);
+    expect(runAllowsOntologyWrites(RUN_ID)).toBe(true);
+  });
+
+  it("accepts the enterprise-write GROUP as an opt-in", () => {
+    // group:enterprise-write exists solely to hold this tool, and it is the
+    // documented way to allow it. A check that only knew the literal name would
+    // make the advertised configuration silently not work.
+    const run = activeRun("root.claims");
+    const claims = run.plan.nodes.find((node) => node.nodeId === "root.claims");
+    if (!claims) {
+      throw new Error("expected the claims node");
+    }
+    claims.ontology = { allowedTools: ["group:enterprise-write"] };
+    registerEnterpriseActiveRun(run);
+    expect(runAllowsOntologyWrites(RUN_ID)).toBe(true);
+  });
+
+  it("does not treat the READ group as opting into writes", () => {
+    const run = activeRun("root.claims");
+    const claims = run.plan.nodes.find((node) => node.nodeId === "root.claims");
+    if (!claims) {
+      throw new Error("expected the claims node");
+    }
+    // group:enterprise has only ever meant read/inspect.
+    claims.ontology = { allowedTools: ["group:enterprise"] };
+    registerEnterpriseActiveRun(run);
+    expect(runAllowsOntologyWrites(RUN_ID)).toBe(false);
+  });
+
+  it("does not treat a wildcard allowlist as opting into writes", () => {
+    // A tree that says `["*"]` has not thought about ontology writes either.
+    const run = activeRun("root.claims");
+    const claims = run.plan.nodes.find((node) => node.nodeId === "root.claims");
+    if (!claims) {
+      throw new Error("expected the claims node");
+    }
+    claims.ontology = { allowedTools: ["*"] };
+    registerEnterpriseActiveRun(run);
+    expect(runAllowsOntologyWrites(RUN_ID)).toBe(false);
+  });
+
   it("is not offered to a mediated run whose tree declares no ontology", () => {
     // Enterprise mode is ON by default and the stock built-in trees are
     // deliberately guidance-free. Gating on "a run is registered" would add three

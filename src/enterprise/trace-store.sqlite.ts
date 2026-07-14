@@ -88,6 +88,7 @@ const RUN_EVENT_KINDS: readonly EnterpriseRunEventKind[] = [
   "governance.decision",
   "node.entered",
   "node.completed",
+  "action.invoked",
 ];
 
 function requireSqliteNumber(value: number | bigint): number {
