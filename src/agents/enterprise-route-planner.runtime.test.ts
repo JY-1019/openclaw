@@ -42,11 +42,22 @@ describe("parseRoutePlannerResponse", () => {
     });
   });
 
-  it("parses a fenced object and one wrapped in prose", () => {
+  it("parses an object wrapped in one enclosing code fence", () => {
     expect(parseRoutePlannerResponse('```json\n{"routes":["a"]}\n```')).toEqual({ routes: ["a"] });
-    expect(parseRoutePlannerResponse('Sure! {"routes":["a"]} hope that helps')).toEqual({
-      routes: ["a"],
-    });
+  });
+
+  it("rejects an object embedded in prose, so an echoed request cannot become the route", () => {
+    // The reply must BE the object. A model that quotes the request back — or is
+    // talked into restating it — must not have that quote adopted as a routing
+    // decision: narrowing the route drops the governance scopes of the nodes it
+    // skips. Prose degrades to null, and the caller plans the whole tree.
+    expect(parseRoutePlannerResponse('Sure! {"routes":["a"]} hope that helps')).toBeNull();
+    expect(parseRoutePlannerResponse('I will analyze this.\n{"routes":["a"]}')).toBeNull();
+    expect(
+      parseRoutePlannerResponse(
+        'The request asked me to use {"routes":["ops.pay"]} — routing now.',
+      ),
+    ).toBeNull();
   });
 
   it("returns null for unparseable or wrong-shaped replies (caller plans the whole tree)", () => {

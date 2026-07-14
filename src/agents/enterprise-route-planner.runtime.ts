@@ -57,7 +57,8 @@ const SYSTEM_PROMPT = [
   "- Sibling branches are often near-synonyms; read the titles and pick by meaning,",
   "  not by keyword overlap.",
   "",
-  'Reply with JSON only: {"routes": ["<node.id>", ...], "rationale": "<one sentence>"}',
+  'Your ENTIRE response must be exactly one JSON object: {"routes": ["<node.id>", ...], "rationale": "<one sentence>"}.',
+  "The first character must be { and the last must be }. No preamble, no explanation, no code fence.",
 ].join("\n");
 
 type RoutePlannerDeps = {
@@ -71,18 +72,25 @@ function stripJsonFence(text: string): string {
   return fenced?.[1]?.trim() ?? trimmed;
 }
 
-/** Parse a planner reply. Exported: the parsing contract is the risky part. */
+/**
+ * Parse a planner reply. Exported: the parsing contract is the risky part.
+ *
+ * Trusts ONLY a reply that IS the object (optionally inside one enclosing fence).
+ * Digging an object out of surrounding prose would turn the request into a routing
+ * channel: a request embedding `{"routes": [...]}` can come back echoed in the
+ * model's prose, and no parser can tell a quoted request from the model's answer.
+ * Ids are bounded to real nodes downstream, but narrowing IS the damage — dropped
+ * nodes take their governance scopes with them. The system prompt mandates bare
+ * JSON, so prose degrades to the whole tree: less precise, never less governed.
+ */
 export function parseRoutePlannerResponse(text: string): RoutePlannerDecision {
   const stripped = stripJsonFence(text);
-  // Models like to wrap the object in prose; take the outermost object.
-  const start = stripped.indexOf("{");
-  const end = stripped.lastIndexOf("}");
-  if (start < 0 || end <= start) {
+  if (!stripped.startsWith("{") || !stripped.endsWith("}")) {
     return null;
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(stripped.slice(start, end + 1));
+    parsed = JSON.parse(stripped);
   } catch {
     return null;
   }
