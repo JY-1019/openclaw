@@ -1,10 +1,11 @@
+import type { RoutePlanner, RoutePlannerDecision } from "@openclaw/enterprise-planner";
 /**
  * Model-backed route planner: given a workflow tree and a request, pick the
  * smallest set of nodes that answers it.
  *
  * This is the only place enterprise mediation talks to a provider. It lives in
  * src/agents (not src/enterprise) so the enterprise core stays provider-free and
- * unit-testable; src/enterprise/route-planner.ts owns the prompt inputs, parsing
+ * unit-testable; @openclaw/enterprise-planner owns the prompt inputs, the parsing
  * contract, and route→node resolution.
  *
  * Every failure path returns null, which the caller reads as "no opinion" and
@@ -13,7 +14,6 @@
  */
 import { z } from "zod";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { RoutePlanner, RoutePlannerDecision } from "../enterprise/route-planner.js";
 import { redactSecrets } from "../logging/redact.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import {

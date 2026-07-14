@@ -4,9 +4,9 @@
  * match hints and the highest-scoring tree wins deterministically.
  */
 import { createHash } from "node:crypto";
+import { countTreeNodes, type EnterpriseRouteSelection } from "@openclaw/enterprise-planner";
 import { redactSecrets } from "../logging/redact.js";
 import { BUILTIN_ASSIST_TREE } from "./builtin-trees.js";
-import { countTreeNodes, type EnterpriseRouteSelection } from "./route-planner.js";
 import type {
   EnterpriseRoutePlan,
   EnterpriseMode,

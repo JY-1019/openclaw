@@ -1,3 +1,4 @@
+import type { RoutePlanner } from "@openclaw/enterprise-planner";
 /**
  * Runner glue for ClawWorks enterprise mediation, shared by every agent
  * runtime (embedded, CLI-backed, ACP): binds the run to a workflow subtree,
@@ -6,7 +7,6 @@
  */
 import { getRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { RoutePlanner } from "../enterprise/route-planner.js";
 import { beginEnterpriseRun, endEnterpriseRun } from "../enterprise/run-mediation.js";
 import { resolveEnterpriseMode } from "../enterprise/runtime.js";
 import type { EnterpriseRunStatus } from "../enterprise/types.js";
@@ -60,14 +60,9 @@ export type EnterpriseMediatedRunParams = {
  * cannot express as a ref" — and those must behave differently. Guessing the
  * former for the latter is exactly the leak this exists to prevent.
  */
-/**
- * Hooks that run AFTER mediation and can still change where the turn goes — or
- * whether it goes anywhere at all. Route planning must not pre-empt them with a
- * model call.
- */
-function defaultHasBlockingHook(): boolean {
+function defaultHasHook(hook: "before_model_resolve" | "before_agent_reply"): boolean {
   try {
-    return hasGlobalHooks("before_model_resolve") || hasGlobalHooks("before_agent_reply");
+    return hasGlobalHooks(hook);
   } catch {
     // No hook runtime registered (tests, early startup): nothing can rewrite the
     // model or claim the turn, so planning on the run's own choice stays correct.
@@ -84,7 +79,7 @@ export type RouteModelChoice =
 
 export function resolveRouteModelRef(
   params: EnterpriseMediatedRunParams,
-  deps: { hasBlockingHook?: () => boolean } = {},
+  deps: { hasHook?: (hook: "before_model_resolve" | "before_agent_reply") => boolean } = {},
 ): RouteModelChoice {
   // The turn goes to a backend we do not choose the model for, so there is no
   // model choice to route with. Planning would ship the prompt to OpenClaw's
@@ -92,16 +87,22 @@ export function resolveRouteModelRef(
   if (params.externalDispatch) {
     return { kind: "skip" };
   }
+  const hasHook = deps.hasHook ?? defaultHasHook;
   // A before_model_resolve hook can swap the run onto a different (often local
   // or private) provider AFTER mediation runs. We would be routing on the
   // pre-hook model, i.e. possibly the very cloud default the hook exists to
   // avoid. We cannot know the post-hook choice here, so we do not plan.
+  if (hasHook("before_model_resolve")) {
+    return { kind: "skip" };
+  }
+  // On a CRON run a before_agent_reply hook can claim the turn and answer it
+  // without ever reaching a backend (see the same gate in cli-runner). Planning
+  // first would make a model call for a turn that was never going to make one.
   //
-  // A before_agent_reply hook can claim or silence the turn entirely before the
-  // backend is ever called. Planning first would make a model call for a turn the
-  // hook was going to handle without one.
-  const hasBlockingHook = deps.hasBlockingHook ?? defaultHasBlockingHook;
-  if (hasBlockingHook()) {
+  // Scoped to cron ON PURPOSE: a bundled plugin (memory-core) registers this hook
+  // in every install, so skipping on its mere presence would disable route
+  // planning for everyone.
+  if (params.trigger === "cron" && hasHook("before_agent_reply")) {
     return { kind: "skip" };
   }
   const model = params.model?.trim();

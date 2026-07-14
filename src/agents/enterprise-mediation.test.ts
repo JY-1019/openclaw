@@ -164,14 +164,33 @@ describe("route planning model selection", () => {
     });
   });
 
-  it("SKIPS planning when a hook can still swap the provider or claim the turn", () => {
+  it("SKIPS planning when a before_model_resolve hook can still swap the provider", () => {
     // The hook runs AFTER mediation, so planning here would use the pre-hook
     // model — possibly the very cloud default the hook exists to avoid.
     expect(
       resolveRouteModelRefForTest(makeParams({ provider: "anthropic", model: "opus" }), {
-        hasBlockingHook: () => true,
+        hasHook: (hook) => hook === "before_model_resolve",
       }),
     ).toEqual({ kind: "skip" });
+  });
+
+  it("SKIPS planning for a CRON run when a before_agent_reply hook may claim it", () => {
+    expect(
+      resolveRouteModelRefForTest(
+        makeParams({ provider: "anthropic", model: "opus", trigger: "cron" }),
+        { hasHook: (hook) => hook === "before_agent_reply" },
+      ),
+    ).toEqual({ kind: "skip" });
+  });
+
+  it("still plans a normal turn when only before_agent_reply exists", () => {
+    // A bundled plugin (memory-core) registers this hook in EVERY install, so
+    // skipping on its presence alone would disable route planning for everyone.
+    expect(
+      resolveRouteModelRefForTest(makeParams({ provider: "anthropic", model: "opus" }), {
+        hasHook: (hook) => hook === "before_agent_reply",
+      }),
+    ).toEqual({ kind: "ref", ref: "anthropic/opus" });
   });
 
   it("uses the agent default when the run pinned nothing (that IS its choice)", () => {

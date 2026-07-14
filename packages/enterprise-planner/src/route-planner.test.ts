@@ -6,22 +6,15 @@ import {
   selectWorkflowRoute,
   type RoutePlanner,
 } from "./route-planner.js";
-import type { WorkflowNodeDefinition, WorkflowTreeDefinition } from "./types.js";
+import type { PlannableNode, PlannableTree } from "./types.js";
 
-function node(
-  id: string,
-  title: string,
-  children?: WorkflowNodeDefinition[],
-): WorkflowNodeDefinition {
+function node(id: string, title: string, children?: PlannableNode[]): PlannableNode {
   return { id, title, ...(children ? { children } : {}) };
 }
 
 /** Two domains, each with two leaves: enough to prune, small enough to read. */
-const TREE: WorkflowTreeDefinition = {
-  schema: "clawworks.workflow-tree",
-  schemaVersion: 1,
+const TREE: PlannableTree = {
   id: "acme.ops",
-  version: "1.0.0",
   name: "Ops",
   root: node("ops", "Operations", [
     node("ops.claims", "Claims", [
@@ -155,7 +148,7 @@ describe("selectWorkflowRoute", () => {
 
   it("does not call the planner for a tree too small to be worth planning", async () => {
     const planner = plannerReturning(["tiny.a"]);
-    const tiny: WorkflowTreeDefinition = {
+    const tiny: PlannableTree = {
       ...TREE,
       id: "acme.tiny",
       root: node("tiny", "Tiny", [node("tiny.a", "A")]),

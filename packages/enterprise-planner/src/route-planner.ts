@@ -17,7 +17,12 @@
  * behavior) rather than failing.
  */
 import { z } from "zod";
-import type { EnterpriseId, WorkflowNodeDefinition, WorkflowTreeDefinition } from "./types.js";
+import type { PlannableNode, PlannableTree } from "./types.js";
+
+/** Alias kept for readability inside this module. */
+type EnterpriseId = string;
+type WorkflowNodeDefinition = PlannableNode;
+type WorkflowTreeDefinition = PlannableTree;
 
 /** Trees this small are cheaper to run whole than to ask a model about. */
 const MIN_NODES_TO_PLAN = 5;

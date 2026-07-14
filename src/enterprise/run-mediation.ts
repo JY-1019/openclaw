@@ -9,6 +9,11 @@
  * row and the in-memory registry only holds currently-active executions.
  */
 import { randomUUID } from "node:crypto";
+import {
+  selectWorkflowRoute,
+  type EnterpriseRouteSelection,
+  type RoutePlanner,
+} from "@openclaw/enterprise-planner";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { evaluateRunStartGovernance, resolveGovernancePolicies } from "./governance.js";
@@ -18,11 +23,6 @@ import {
   classifyWorkflowTrigger,
   selectWorkflowTree,
 } from "./plan.js";
-import {
-  selectWorkflowRoute,
-  type EnterpriseRouteSelection,
-  type RoutePlanner,
-} from "./route-planner.js";
 import {
   registerEnterpriseActiveRun,
   resolveEnterpriseMode,
