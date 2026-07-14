@@ -281,8 +281,70 @@ root:
         expression: "coalesce($claimed-amount, 0)"
         returns: number
 
+    # ---- Seeded object INSTANCES ----
+    # The tree declares the objects a step works on, and they are materialized into
+    # SQLite on import. This is the exchange format; the runtime reads and writes
+    # only the store. A re-import re-applies these (the tree owns what it declares)
+    # and never touches objects an action created during a run.
+    #
+    # Identity is the value of each object type's primaryKey property, which is why
+    # `claim/CLM-1042` and `$claim-id` in an expression name the same thing.
+    objects:
+      - entity: customer
+        properties:
+          customer-id: CUST-8801
+          legal-name: Meridian Freight Ltd
+          jurisdiction: GB
+          risk-rating: medium
+      - entity: policy
+        properties:
+          policy-id: POL-4417
+          coverage-limit: 250000
+          effective-from: "2025-11-01"
+      - entity: claim
+        properties:
+          claim-id: CLM-1042
+          claimed-amount: 84000
+          status: intake
+          fraud-score: 91
+      - entity: claim
+        properties:
+          claim-id: CLM-1043
+          claimed-amount: 2300
+          status: intake
+          fraud-score: 12
+      - entity: claim
+        properties:
+          claim-id: CLM-1044
+          claimed-amount: 46000
+          status: adjudicating
+          fraud-score: 38
+      - entity: document
+        properties:
+          document-id: DOC-9001
+          kind: invoice
+          verified: false
+      - entity: document
+        properties:
+          document-id: DOC-9002
+          kind: photo
+          verified: false
+
+    links:
+      - { relationship: customer-holds-policy, from: CUST-8801, to: POL-4417 }
+      - { relationship: claim-against-policy, from: CLM-1042, to: POL-4417 }
+      - { relationship: claim-against-policy, from: CLM-1043, to: POL-4417 }
+      - { relationship: claim-against-policy, from: CLM-1044, to: POL-4417 }
+      - { relationship: claim-evidenced-by-document, from: CLM-1042, to: DOC-9001 }
+      - { relationship: claim-evidenced-by-document, from: CLM-1042, to: DOC-9002 }
+
     # Root tool floor: nothing under this tree runs shell or process tools, in any
     # step. Deny wins over any descendant's allow, so this is a hard ceiling.
+    #
+    # The ontology tools must also be allowed at the ROOT, not only on the leaf that
+    # uses them: allowedTools is an independent gate at EVERY node on the root→leaf
+    # path, so a root that scopes tools without listing these would deny them at
+    # every step below. (This is the trap knowledge_search already hit.)
     deniedTools: [exec, process, browser]
     contextHints:
       - Cite the object type and primary key of anything you assert (e.g. claim-id CLM-1042).
@@ -680,7 +742,17 @@ root:
                     effects:
                       - { entity: claim, kind: update, description: Sets claim.status to adjudicating. }
                       - { entity: policy, kind: read }
-                allowedTools: [knowledge_search, memory_search]
+                # This step works ON the object graph: it searches claims, walks to
+                # the policy they are filed against, and computes the triage band —
+                # rather than being told about them in prose.
+                allowedTools:
+                  [
+                    knowledge_search,
+                    memory_search,
+                    search_objects,
+                    get_neighbors,
+                    compute_function,
+                  ]
                 knowledgeFoundations: [acme.claims-handbook]
                 expectedOutput: The claim's class and where it is routed next.
             - id: finops.claims.intake.coverage-check

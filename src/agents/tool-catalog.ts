@@ -278,6 +278,33 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     profiles: [],
     includeInOpenClawGroup: false,
   },
+  // The ontology tools. Same enterprise-only shape as knowledge_search: an
+  // operator who already wrote `allow: ["group:openclaw"]` must not silently
+  // gain the ability to read or mutate a governed object graph.
+  {
+    id: "search_objects",
+    label: "search_objects",
+    description: "Search ontology objects in the current workflow step",
+    sectionId: "enterprise",
+    profiles: [],
+    includeInOpenClawGroup: false,
+  },
+  {
+    id: "get_neighbors",
+    label: "get_neighbors",
+    description: "Walk ontology links from one object",
+    sectionId: "enterprise",
+    profiles: [],
+    includeInOpenClawGroup: false,
+  },
+  {
+    id: "compute_function",
+    label: "compute_function",
+    description: "Evaluate a declared ontology function over an object",
+    sectionId: "enterprise",
+    profiles: [],
+    includeInOpenClawGroup: false,
+  },
   {
     id: "get_goal",
     label: "get_goal",

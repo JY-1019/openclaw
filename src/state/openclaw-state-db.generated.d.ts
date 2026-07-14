@@ -455,6 +455,27 @@ export interface DiagnosticStabilityBundles {
   reason: string;
 }
 
+export interface EnterpriseOntologyLinks {
+  created_at: number;
+  from_entity_id: string;
+  from_object_id: string;
+  provenance: string;
+  relationship_id: string;
+  to_entity_id: string;
+  to_object_id: string;
+  tree_id: string;
+}
+
+export interface EnterpriseOntologyObjects {
+  created_at: number;
+  entity_id: string;
+  object_id: string;
+  properties_json: string;
+  provenance: string;
+  tree_id: string;
+  updated_at: number;
+}
+
 export interface EnterpriseRunEvents {
   created_at: number;
   execution_id: string;
@@ -1029,6 +1050,8 @@ export interface DB {
   device_pairing_pending: DevicePairingPending;
   diagnostic_events: DiagnosticEvents;
   diagnostic_stability_bundles: DiagnosticStabilityBundles;
+  enterprise_ontology_links: EnterpriseOntologyLinks;
+  enterprise_ontology_objects: EnterpriseOntologyObjects;
   enterprise_run_events: EnterpriseRunEvents;
   enterprise_runs: EnterpriseRuns;
   enterprise_workflow_tree_versions: EnterpriseWorkflowTreeVersions;

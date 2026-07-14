@@ -498,6 +498,150 @@ describe("ontology function types", () => {
   });
 });
 
+describe("seeded objects", () => {
+  function treeWithSeed(
+    entityProps: Array<Record<string, unknown>>,
+    seedProps: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const tree = validTree();
+    const root = tree.root as Record<string, unknown>;
+    (root.ontology as Record<string, unknown>).entities = [
+      { id: "claim", properties: entityProps },
+    ];
+    (root.ontology as Record<string, unknown>).objects = [
+      { entity: "claim", properties: seedProps },
+    ];
+    return tree;
+  }
+
+  const PROPS = [
+    { id: "claim-id", type: "id", primaryKey: true },
+    { id: "amount", type: "number", required: true },
+    { id: "note", type: "string" },
+  ];
+
+  it("accepts a seed that satisfies its object type", () => {
+    expect(
+      validateWorkflowTreeDefinition(treeWithSeed(PROPS, { "claim-id": "C-1", amount: 5 })).ok,
+    ).toBe(true);
+  });
+
+  it("rejects a seed that omits a required property", () => {
+    // An instance that violates its own object type: search_objects would hand the
+    // model an object the ontology says cannot exist.
+    const result = validateWorkflowTreeDefinition(treeWithSeed(PROPS, { "claim-id": "C-1" }));
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.issues[0]?.message).toContain('declares "amount" required');
+  });
+
+  it("rejects a seed that nulls a required property", () => {
+    expect(
+      validateWorkflowTreeDefinition(treeWithSeed(PROPS, { "claim-id": "C-1", amount: null })).ok,
+    ).toBe(false);
+  });
+
+  it("rejects a blank primary key", () => {
+    // Links require non-blank endpoints and the tools reject a blank objectId, so
+    // a "" identity would be visible but unaddressable.
+    expect(
+      validateWorkflowTreeDefinition(treeWithSeed(PROPS, { "claim-id": "  ", amount: 5 })).ok,
+    ).toBe(false);
+  });
+
+  it("rejects a primaryKey with leading or trailing whitespace", () => {
+    // The tools read objectId with the standard trimming param reader, so an
+    // object stored as " C-1 " comes back from search_objects with an id that
+    // get_neighbors can no longer look up.
+    expect(
+      validateWorkflowTreeDefinition(treeWithSeed(PROPS, { "claim-id": " C-1 ", amount: 5 })).ok,
+    ).toBe(false);
+  });
+
+  it("rejects a seeded value whose type contradicts the declared property", () => {
+    expect(
+      validateWorkflowTreeDefinition(treeWithSeed(PROPS, { "claim-id": "C-1", amount: "lots" })).ok,
+    ).toBe(false);
+  });
+});
+
+describe("seeded link cardinality", () => {
+  function treeWithLinks(
+    cardinality: string,
+    links: Array<Record<string, string>>,
+  ): Record<string, unknown> {
+    const tree = validTree();
+    const root = tree.root as Record<string, unknown>;
+    (root.ontology as Record<string, unknown>).entities = [
+      { id: "claim", properties: [{ id: "claim-id", type: "id", primaryKey: true }] },
+      { id: "policy", properties: [{ id: "policy-id", type: "id", primaryKey: true }] },
+    ];
+    (root.ontology as Record<string, unknown>).relationships = [
+      { id: "claim-against-policy", from: "claim", to: "policy", cardinality },
+    ];
+    (root.ontology as Record<string, unknown>).objects = [
+      { entity: "claim", properties: { "claim-id": "C-1" } },
+      { entity: "claim", properties: { "claim-id": "C-2" } },
+      { entity: "policy", properties: { "policy-id": "P-1" } },
+      { entity: "policy", properties: { "policy-id": "P-2" } },
+    ];
+    (root.ontology as Record<string, unknown>).links = links;
+    return tree;
+  }
+
+  it("allows many claims to point at one policy when many-to-one", () => {
+    expect(
+      validateWorkflowTreeDefinition(
+        treeWithLinks("many-to-one", [
+          { relationship: "claim-against-policy", from: "C-1", to: "P-1" },
+          { relationship: "claim-against-policy", from: "C-2", to: "P-1" },
+        ]),
+      ).ok,
+    ).toBe(true);
+  });
+
+  it("rejects one claim pointing at two policies when many-to-one", () => {
+    // Cardinality is a CONTRACT, not a label: get_neighbors would otherwise return
+    // a graph that contradicts the ontology the model was handed.
+    const result = validateWorkflowTreeDefinition(
+      treeWithLinks("many-to-one", [
+        { relationship: "claim-against-policy", from: "C-1", to: "P-1" },
+        { relationship: "claim-against-policy", from: "C-1", to: "P-2" },
+      ]),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.issues[0]?.message).toContain("may appear on its from side only once");
+  });
+
+  it("rejects two claims claiming the same policy when one-to-many", () => {
+    expect(
+      validateWorkflowTreeDefinition(
+        treeWithLinks("one-to-many", [
+          { relationship: "claim-against-policy", from: "C-1", to: "P-1" },
+          { relationship: "claim-against-policy", from: "C-2", to: "P-1" },
+        ]),
+      ).ok,
+    ).toBe(false);
+  });
+
+  it("leaves many-to-many unconstrained", () => {
+    expect(
+      validateWorkflowTreeDefinition(
+        treeWithLinks("many-to-many", [
+          { relationship: "claim-against-policy", from: "C-1", to: "P-1" },
+          { relationship: "claim-against-policy", from: "C-1", to: "P-2" },
+          { relationship: "claim-against-policy", from: "C-2", to: "P-1" },
+        ]),
+      ).ok,
+    ).toBe(true);
+  });
+});
+
 describe("built-in workflow trees", () => {
   it("all validate against the tree schema", () => {
     for (const tree of BUILTIN_WORKFLOW_TREES) {

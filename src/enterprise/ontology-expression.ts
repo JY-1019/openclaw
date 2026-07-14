@@ -21,10 +21,7 @@
  * nobody enforces: `$score >= 75` could claim `returns: string` and every client
  * reading the ontology would be told a lie that only surfaces at evaluation.
  */
-import type { OntologyValueType } from "./types.js";
-
-/** Values an ontology property or a computed function can carry. */
-export type OntologyValue = string | number | boolean | null;
+import type { OntologyValue, OntologyValueType } from "./types.js";
 
 /**
  * How a declared ontology type behaves INSIDE an expression. `date` and `id`
@@ -42,6 +39,15 @@ export function expressionTypeOf(valueType: OntologyValueType): ExpressionType {
     default:
       return "string";
   }
+}
+
+/**
+ * Does a concrete value match a declared ontology type? Used wherever untyped
+ * data meets the ontology — seeded objects at import, action parameters at call
+ * time. null is always accepted: it is how an optional property says "unset".
+ */
+export function ontologyValueMatchesType(value: OntologyValue, type: OntologyValueType): boolean {
+  return value === null || typeof value === expressionTypeOf(type);
 }
 
 type Node =

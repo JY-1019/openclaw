@@ -287,7 +287,16 @@ export function ontologyHasGuidance(ontology: OntologyBinding): boolean {
     ontology.deniedTools?.length ||
     ontology.actions?.length ||
     ontology.knowledgeFoundations?.length ||
-    ontology.expectedOutput,
+    ontology.expectedOutput ||
+    // The object graph is guidance too. Without these, a tree whose ONLY guidance
+    // is its ontology reads as guidance-free: the step loop never advances past
+    // the root, so every ontology tool call resolves the root scope and rejects
+    // the leaf's own object types for the entire run.
+    ontology.entities?.length ||
+    ontology.relationships?.length ||
+    ontology.functions?.length ||
+    ontology.objects?.length ||
+    ontology.links?.length,
   );
 }
 
@@ -310,6 +319,51 @@ export function planTracksSteps(plan: EnterpriseRunPlan): boolean {
 
 /** Append one node's ontology guidance to the digest, indented under its step. */
 function appendOntologyGuidance(lines: string[], ontology: OntologyBinding, indent: string): void {
+  // The step's addressable ontology: the ids its tools take as arguments. Without
+  // these the model has the tools but no vocabulary for them — it cannot know this
+  // step addresses a "claim", that a claim links to a "policy", or that a
+  // "claim-triage-band" exists to compute, so it would guess ids and read back
+  // errors.
+  //
+  // Deliberately does NOT name the tools. Tool availability is a RUNTIME fact
+  // (these are opt-in enterprise tools, and a CLI loopback path builds tools with
+  // no runId at all), while this digest is built from the plan alone. Naming them
+  // here would tell the model to call something the run may never have been given;
+  // the tools introduce themselves through their own descriptions.
+  //
+  // Ids and shapes only. The VALUES live in the store and are fetched with a tool;
+  // restating them here would be the prompt-stuffing this slice exists to replace.
+  if (ontology.entities?.length) {
+    lines.push(`${indent}Object types:`);
+    for (const entity of ontology.entities.slice(0, DIGEST_MAX_HINT_LINES)) {
+      const properties = (entity.properties ?? []).map(
+        (property) => `${property.id}${property.primaryKey ? "*" : ""}`,
+      );
+      lines.push(
+        `${indent}- ${entity.id}${properties.length ? ` (${properties.join(", ")})` : ""}`,
+      );
+    }
+  }
+  if (ontology.relationships?.length) {
+    lines.push(`${indent}Link types:`);
+    for (const relationship of ontology.relationships.slice(0, DIGEST_MAX_HINT_LINES)) {
+      lines.push(
+        `${indent}- ${relationship.id}: ${relationship.from} -> ${relationship.to}${
+          relationship.cardinality ? ` (${relationship.cardinality})` : ""
+        }`,
+      );
+    }
+  }
+  if (ontology.functions?.length) {
+    lines.push(`${indent}Derived values:`);
+    for (const fn of ontology.functions.slice(0, DIGEST_MAX_HINT_LINES)) {
+      lines.push(
+        `${indent}- ${fn.id}: over ${fn.entity}, returns ${fn.returns}${
+          fn.description ? ` — ${fn.description}` : ""
+        }`,
+      );
+    }
+  }
   if (ontology.actions?.length) {
     lines.push(`${indent}Actions:`);
     for (const action of ontology.actions.slice(0, DIGEST_MAX_HINT_LINES)) {

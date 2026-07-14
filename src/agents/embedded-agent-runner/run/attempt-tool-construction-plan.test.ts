@@ -1,5 +1,6 @@
 // Coverage for embedded attempt tool construction and runtime allowlists.
 import { describe, expect, it } from "vitest";
+import { CORE_TOOL_GROUPS } from "../../tool-catalog.js";
 import {
   applyEmbeddedAttemptToolsAllow,
   mergeForcedEmbeddedAttemptToolsAllow,
@@ -11,6 +12,29 @@ import {
 type EmbeddedAttemptToolConstructionPlan = ReturnType<
   typeof resolveEmbeddedAttemptToolConstructionPlan
 >;
+
+describe("enterprise tools are known to the factory allowlist", () => {
+  it("resolves every enterprise catalog tool to the OpenClaw factory, not the plugin path", () => {
+    // The trap this closes: OPENCLAW_TOOL_FACTORY_NAMES is a hand-maintained Set,
+    // and a name missing from it is misclassified as a PLUGIN tool. Then
+    // createOpenClawTools() is never called and a run with
+    // `toolsAllow: ["search_objects"]` silently hands the model ZERO tools — no
+    // error, no warning. Enterprise tools are all emitted by the factory, so
+    // every one of them must resolve to includeOpenClawTools.
+    // CORE_TOOL_GROUPS is built by spreading a Map, so its inferred type only
+    // names the one literal key; widen to read the generated section groups.
+    const groups: Record<string, readonly string[] | undefined> = CORE_TOOL_GROUPS;
+    const enterpriseTools = groups["group:enterprise"] ?? [];
+    expect(enterpriseTools.length).toBeGreaterThan(0);
+    for (const toolId of enterpriseTools) {
+      const plan = resolveEmbeddedAttemptToolConstructionPlan({ toolsAllow: [toolId] });
+      expect(
+        plan.codingToolConstructionPlan.includeOpenClawTools,
+        `${toolId} must be built by createOpenClawTools`,
+      ).toBe(true);
+    }
+  });
+});
 
 function expectConstructionPlan(
   plan: EmbeddedAttemptToolConstructionPlan,
@@ -99,8 +123,9 @@ describe("applyEmbeddedAttemptToolsAllow", () => {
   it("keeps plugin-only allowlists on the shared tool policy path", () => {
     const tools = [{ name: "memory_search" }, { name: "plugin_extra" }];
 
-    expect(resolveEmbeddedAttemptToolConstructionPlan({ toolsAllow: ["memory_search"] }))
-      .toHaveProperty("includeCoreTools", false);
+    expect(
+      resolveEmbeddedAttemptToolConstructionPlan({ toolsAllow: ["memory_search"] }),
+    ).toHaveProperty("includeCoreTools", false);
     expect(
       applyEmbeddedAttemptToolsAllow(tools, ["memory_search"]).map((tool) => tool.name),
     ).toEqual(["memory_search"]);

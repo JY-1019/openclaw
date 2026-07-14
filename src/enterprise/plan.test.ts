@@ -282,6 +282,117 @@ describe("buildEnterprisePromptSection", () => {
     expect(buildEnterprisePromptSection(plan)).toBe("");
   });
 
+  it("renders the ids the ontology tools take as arguments", () => {
+    // Without these the model has the tools but no vocabulary for them: it cannot
+    // know this step addresses a "claim", that it links to a "policy", or that a
+    // "band" exists to compute — so it would have to guess ids and read back
+    // errors. Ids and shapes only; the VALUES are fetched with search_objects.
+    const plan = buildEnterpriseRunPlan({
+      runId: "run-onto",
+      requestText: "triage",
+      trigger: "user",
+      mode: "enforce",
+      trees: [
+        {
+          schema: "clawworks.workflow-tree",
+          schemaVersion: 1,
+          id: "acme.claims",
+          version: "1.0.0",
+          name: "Claims",
+          match: { triggers: ["user"], priority: 50 },
+          root: {
+            id: "claims",
+            title: "Handle a claim",
+            ontology: {
+              entities: [
+                {
+                  id: "claim",
+                  properties: [
+                    { id: "claim-id", type: "id", primaryKey: true },
+                    { id: "fraud-score", type: "number" },
+                  ],
+                },
+                { id: "policy", properties: [{ id: "policy-id", type: "id", primaryKey: true }] },
+              ],
+              relationships: [
+                {
+                  id: "claim-against-policy",
+                  from: "claim",
+                  to: "policy",
+                  cardinality: "many-to-one",
+                },
+              ],
+              functions: [
+                {
+                  id: "band",
+                  entity: "claim",
+                  expression: "$fraud-score >= 80 ? 'refer' : 'auto'",
+                  returns: "string",
+                },
+              ],
+            },
+            children: [{ id: "claims.triage", title: "Triage" }],
+          },
+        },
+      ],
+    });
+    const section = buildEnterprisePromptSection(plan);
+    expect(section).toContain("Object types:");
+    // The primaryKey is starred: it is the id every other tool takes.
+    expect(section).toContain("- claim (claim-id*, fraud-score)");
+    expect(section).toContain("Link types:");
+    expect(section).toContain("- claim-against-policy: claim -> policy (many-to-one)");
+    expect(section).toContain("Derived values:");
+    expect(section).toContain("- band: over claim, returns string");
+    // Ids and shapes, not values: the object graph lives in the store.
+    expect(section).not.toContain("fraud-score >= 80");
+    // Tool availability is a RUNTIME fact (opt-in tools; CLI loopback builds tools
+    // with no runId at all), while this digest is built from the plan alone. Naming
+    // the tools would tell the model to call something the run may never have got.
+    expect(section).not.toContain("search_objects");
+    expect(section).not.toContain("get_neighbors");
+    expect(section).not.toContain("compute_function");
+  });
+
+  it("never names a tool in the digest, whatever the tree declares", () => {
+    // Tool availability is decided by the RUNTIME, not the tree. A compat tree may
+    // declare relationships without ever declaring their endpoint types under
+    // `entities` (the schema allows it) and gets no ontology tools at all.
+    const plan = buildEnterpriseRunPlan({
+      runId: "run-compat",
+      requestText: "x",
+      trigger: "user",
+      mode: "enforce",
+      trees: [
+        {
+          schema: "clawworks.workflow-tree",
+          schemaVersion: 1,
+          id: "acme.compat",
+          version: "1.0.0",
+          name: "Compat",
+          match: { triggers: ["user"], priority: 50 },
+          root: {
+            id: "compat",
+            title: "Compat step",
+            ontology: {
+              relationships: [{ id: "a-b", from: "a", to: "b" }],
+              expectedOutput: "Something.",
+            },
+            children: [{ id: "compat.leaf", title: "Leaf" }],
+          },
+        },
+      ],
+    });
+    const section = buildEnterprisePromptSection(plan);
+    expect(section).toContain("Expected output: Something.");
+    // Describing the tree's link types is fine; NAMING a tool is not. This tree
+    // gets no ontology tools at all, so an instruction to call one would be a lie.
+    expect(section).toContain("Link types:");
+    expect(section).not.toContain("get_neighbors");
+    expect(section).not.toContain("search_objects");
+    expect(section).not.toContain("compute_function");
+  });
+
   it("renders a compact digest for guidance-bearing ontologies", () => {
     const plan = buildEnterpriseRunPlan({
       runId: "run-4",

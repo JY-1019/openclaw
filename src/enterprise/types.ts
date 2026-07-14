@@ -16,6 +16,12 @@ export type EnterpriseId = string;
  */
 export type OntologyValueType = "string" | "number" | "boolean" | "date" | "id";
 
+/**
+ * A value an ontology property can carry. `date` and `id` are strings (ISO-8601
+ * and opaque, respectively), so the runtime carries four shapes, not five.
+ */
+export type OntologyValue = string | number | boolean | null;
+
 /** One typed field on an object type. */
 export type OntologyProperty = {
   id: EnterpriseId;
@@ -109,6 +115,31 @@ export type OntologyFunction = {
   returns: OntologyValueType;
 };
 
+/**
+ * One object INSTANCE the tree declares up front.
+ *
+ * The tree owns what it declares: a seed is re-applied on every import, so
+ * editing the definition updates it. Objects an action creates during a run are
+ * `runtime`-provenance and are never clobbered by a re-import. Instances live in
+ * SQLite; this is the exchange format, not the runtime store.
+ */
+export type OntologyObjectSeed = {
+  /** Object type this is an instance of. */
+  entity: EnterpriseId;
+  /** Property values keyed by property id. Must carry the type's primaryKey. */
+  properties: Record<string, OntologyValue>;
+};
+
+/** One declared link between two seeded objects (instance level, not type level). */
+export type OntologyLinkSeed = {
+  /** Link type id declared under `relationships`. */
+  relationship: EnterpriseId;
+  /** primaryKey value of the source object. */
+  from: string;
+  /** primaryKey value of the target object. */
+  to: string;
+};
+
 /** Constraint the step must respect; blocking constraints join governance denials. */
 export type OntologyConstraint = {
   id: EnterpriseId;
@@ -125,6 +156,10 @@ export type OntologyBinding = {
   relationships?: OntologyRelationship[];
   actions?: OntologyAction[];
   functions?: OntologyFunction[];
+  /** Object instances the tree declares. Materialized into SQLite on import. */
+  objects?: OntologyObjectSeed[];
+  /** Links between the declared objects. Materialized into SQLite on import. */
+  links?: OntologyLinkSeed[];
   constraints?: OntologyConstraint[];
   /** Tool name globs allowed for this node. Empty/omitted = allow all (repo tool-policy semantics). */
   allowedTools?: string[];
