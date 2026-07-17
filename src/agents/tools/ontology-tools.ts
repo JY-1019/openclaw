@@ -102,6 +102,16 @@ export function createSearchObjectsTool(opts: { runId: string }): AnyAgentTool {
           error: outOfScopeMessage("object type", entity, scope.entities.keys()),
         });
       }
+      if (!primaryKeyOf(declared)) {
+        // In scope but no primaryKey (a re-import dropped it) means the type can no
+        // longer own addressable instances, yet its runtime rows outlive the
+        // re-import (replaceSeededOntologyObjects keeps them). Refuse rather than
+        // hand back those orphaned rows — the same gate compute_function and the
+        // enterprise.objects.list gateway read enforce.
+        return jsonResult({
+          error: `object type "${entity}" is not addressable from this workflow step`,
+        });
+      }
       // Only the properties THIS step declares. An object type is tree-scoped, so
       // a stored row can carry fields a sibling branch added, and returning them
       // (or letting `match` probe them) would reach past the step's contract.
@@ -159,9 +169,18 @@ export function createGetNeighborsTool(opts: { runId: string }): AnyAgentTool {
         readPositiveIntegerParam(record, "limit", { max: NEIGHBOR_MAX_LIMIT }) ??
         NEIGHBOR_DEFAULT_LIMIT;
 
-      if (!scope.entities.has(entity)) {
+      const startEntity = scope.entities.get(entity);
+      if (!startEntity) {
         return jsonResult({
           error: outOfScopeMessage("object type", entity, scope.entities.keys()),
+        });
+      }
+      if (!primaryKeyOf(startEntity)) {
+        // A de-addressed entity keeps its runtime rows and links across a re-import,
+        // so traversing from one would surface those stale objects. Gate like
+        // search_objects / compute_function.
+        return jsonResult({
+          error: `object type "${entity}" is not addressable from this workflow step`,
         });
       }
       if (relationship && !scope.relationships.has(relationship)) {
@@ -179,8 +198,15 @@ export function createGetNeighborsTool(opts: { runId: string }): AnyAgentTool {
         objectId,
         ...(relationship ? { relationship } : {}),
         relationships: [...scope.relationships.keys()],
+        // Only ADDRESSABLE neighbor types (a primaryKey): getOntologyNeighbors drops
+        // an edge whose far end is absent from this map, so leaving out a
+        // de-addressed target (its runtime rows/links outlive the re-import that
+        // dropped its primaryKey) stops the traversal surfacing those stale rows —
+        // the same reason search_objects refuses a de-addressed type outright.
         visibleProperties: new Map(
-          [...scope.entities].map(([id, declared]) => [id, visiblePropertiesOf(declared)]),
+          [...scope.entities]
+            .filter(([, declared]) => primaryKeyOf(declared) !== null)
+            .map(([id, declared]) => [id, visiblePropertiesOf(declared)]),
         ),
         limit,
       });

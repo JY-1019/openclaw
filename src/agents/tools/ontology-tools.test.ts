@@ -203,6 +203,75 @@ describe("search_objects", () => {
   });
 });
 
+describe("addressability gate: a dropped primaryKey hides stale runtime rows", () => {
+  // The stored C-1 row was seeded while `claim` had a primaryKey. A re-import that
+  // drops the primaryKey keeps that runtime row (seeds are replaced, runtime rows
+  // survive), but the type can no longer own addressable instances — so the reads
+  // must refuse it, matching compute_function and the enterprise.objects.list
+  // gateway path, instead of handing the model an orphaned row.
+  function runWithDeAddressedClaim(): EnterpriseActiveRun {
+    const run = activeRun("root.claims");
+    const root = run.plan.nodes.find((node) => node.nodeId === "root");
+    if (!root) {
+      throw new Error("expected the root node");
+    }
+    root.ontology = {
+      ...root.ontology,
+      entities: (root.ontology.entities ?? []).map((entity) =>
+        entity.id === "claim"
+          ? { id: "claim", properties: [{ id: "amount", type: "number" }] }
+          : entity,
+      ),
+    };
+    return run;
+  }
+
+  it("search_objects refuses a de-addressed type and returns no rows", async () => {
+    registerEnterpriseActiveRun(runWithDeAddressedClaim());
+    const details = await call(createSearchObjectsTool({ runId: RUN_ID }), { entity: "claim" });
+    expect(details.error).toContain("not addressable");
+    expect(details.objects).toBeUndefined();
+  });
+
+  it("get_neighbors refuses to traverse from a de-addressed type", async () => {
+    registerEnterpriseActiveRun(runWithDeAddressedClaim());
+    const details = await call(createGetNeighborsTool({ runId: RUN_ID }), {
+      entity: "claim",
+      objectId: "C-1",
+    });
+    expect(details.error).toContain("not addressable");
+    expect(details.neighbors).toBeUndefined();
+  });
+
+  it("get_neighbors drops a neighbor whose TARGET type was de-addressed", async () => {
+    // claim stays addressable, but policy loses its primaryKey. The stored
+    // claim-against-policy link + P-1 row survive the re-import, and the link type
+    // is still in scope — but the de-addressed target must not surface.
+    const run = activeRun("root.claims");
+    const root = run.plan.nodes.find((node) => node.nodeId === "root");
+    if (!root) {
+      throw new Error("expected the root node");
+    }
+    root.ontology = {
+      ...root.ontology,
+      entities: (root.ontology.entities ?? []).map((entity) =>
+        entity.id === "policy"
+          ? { id: "policy", properties: [{ id: "note", type: "string" }] }
+          : entity,
+      ),
+    };
+    registerEnterpriseActiveRun(run);
+
+    const details = await call(createGetNeighborsTool({ runId: RUN_ID }), {
+      entity: "claim",
+      objectId: "C-1",
+    });
+    // claim-against-policy is the only in-scope link and its target is now
+    // de-addressed, so the traversal surfaces nothing.
+    expect(details.count).toBe(0);
+  });
+});
+
 describe("the node boundary holds against sibling-branch data", () => {
   /** The payroll branch extends `claim` with a field and links it to its own type. */
   function runWithSiblingExtensions(activeNodeId: string): EnterpriseActiveRun {
