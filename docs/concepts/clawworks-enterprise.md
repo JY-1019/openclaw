@@ -115,6 +115,29 @@ Each node carries executable metadata in its `ontology`:
 - `audit`: record a trace event for every tool decision under this node, even
   default allows.
 
+### The typed object model
+
+Beyond the execution scope above, a node's `ontology` can declare a typed object
+graph that the agent operates on directly:
+
+- `entities`: object types. Each has `properties`, and the property marked
+  `primaryKey` is the type's identity. Only a type with a primary key can own
+  addressable instances.
+- `relationships`: typed links between two entity types (`from` and `to`, with
+  an optional `cardinality` and `inverse`).
+- `actions`: typed operations. An action's `effects` name the entity it creates
+  or updates and the properties it writes. Declaring an effect is the write
+  authorization for that object type.
+- `functions`: derived values written in a small closed, type-checked expression
+  language and evaluated against one object.
+- `objects` and `links`: seed instances and edges the tree ships with. A
+  re-import replaces the seeds while rows a run created at runtime are preserved.
+
+Object types are tree-scoped, so instances are stored once per tree. But each
+node only sees the types, properties, relationships, actions, and functions on
+its own root-to-node path, so a sibling branch's declarations are never
+addressable from the current step.
+
 ## How a run is mediated
 
 When a request starts an enterprise-mediated run:
@@ -135,6 +158,24 @@ When a request starts an enterprise-mediated run:
 
 Only the embedded agent runtime advances steps; CLI and ACP runs stay on the
 root scope as a safe backstop.
+
+## Operating on the ontology
+
+When a run's active node declares a typed object model, the agent gets tools
+scoped to that node:
+
+- `search_objects`: list instances of an object type the step declares.
+- `get_neighbors`: walk a declared relationship from one object to its
+  neighbors.
+- `compute_function`: evaluate a declared function over one object.
+- `invoke_action`: perform a declared action, writing the objects and links its
+  `effects` authorize.
+
+The read tools appear whenever the run declares an ontology; `invoke_action`
+appears only when the tree opts into ontology writes. Every tool is bounded to
+the active node's path and to addressable types (those with a primary key), so a
+step can never read, traverse into, or write an object type outside its own
+contract. Writes are recorded to the run trace as `action.invoked` events.
 
 ## Governance policies
 
@@ -222,15 +263,22 @@ event log of run lifecycle plus governance decisions.
 <runId>` (see [`openclaw enterprise`](/cli/enterprise)).
 - **Gateway**: operator clients read via `enterprise.trees.list`,
   `enterprise.trees.get`, `enterprise.trees.export`, `enterprise.runs.list`,
-  and `enterprise.runs.get` (keyed by execution id, since one run id can span
-  retries) — all `operator.read`. Editing the tree registry is admin-scoped:
-  `enterprise.trees.import` and `enterprise.trees.remove` require
-  `operator.admin`, and every import records a revision browsable through
-  `enterprise.trees.history.list` / `enterprise.trees.history.get`.
+  `enterprise.runs.get` (keyed by execution id, since one run id can span
+  retries), and `enterprise.objects.list` — all `operator.read`. Editing the
+  tree registry is admin-scoped: `enterprise.trees.import` and
+  `enterprise.trees.remove` require `operator.admin`, and every import records a
+  revision browsable through `enterprise.trees.history.list` /
+  `enterprise.trees.history.get`.
 - **Control UI**: the **Enterprise** tab lists recent runs and shows a
   per-execution inspector with the plan steps, their ontology scope, and the
   governance trace. Selecting a workflow tree renders its node hierarchy and an
-  ontology graph of the entities and relationships it declares.
+  ontology graph. Clicking a node opens that node's own scope: the ontology it
+  can address plus the live object instances of each addressable type (served by
+  `enterprise.objects.list`, which fails closed on a tree whose definition did
+  not load and only returns instances of types the current definition still
+  addresses). Operators with `operator.admin` can add a child node from the
+  inspector; it splices the node into the tree definition and saves it through
+  the same `enterprise.trees.import` whole-tree replace.
 
 ## Related
 
