@@ -106,12 +106,21 @@ function rowToObject(row: ObjectRow): OntologyObjectRecord {
       `ontology object "${row.entity_id}/${row.object_id}" has malformed properties; re-import the tree`,
     );
   }
+  const updatedAt = normalizeSqliteNumber(row.updated_at);
+  if (updatedAt === undefined) {
+    // updated_at is INTEGER NOT NULL, so a non-numeric value is a tampered row,
+    // not a real state — fail loudly like the malformed-properties check above
+    // rather than mask it as epoch 0.
+    throw new Error(
+      `ontology object "${row.entity_id}/${row.object_id}" has a non-numeric updated_at; re-import the tree`,
+    );
+  }
   return {
     entity: row.entity_id,
     objectId: row.object_id,
     properties: parsed as Record<string, OntologyValue>,
     provenance: parseProvenance(row.provenance),
-    updatedAt: normalizeSqliteNumber(row.updated_at) ?? 0,
+    updatedAt,
   };
 }
 
@@ -170,9 +179,10 @@ export function addressableObjectEntityIds(tree: WorkflowTreeDefinition): Set<En
  *
  * Object identity is the VALUE of the object type's primaryKey property — that
  * is what makes `$claim-id` in an expression and `claim/CLM-1042` in the store
- * the same thing. Import validation already proved every seed carries its
- * primaryKey and every link joins two seeded objects, so this walk assumes a
- * valid tree and does no re-checking.
+ * the same thing. Import validation already proved every seed carries a non-blank
+ * primaryKey and every link joins two seeded objects, so the identity filter
+ * below only drops what a validated tree can never contain — it re-checks nothing
+ * the store then relies on.
  */
 export function collectOntologySeed(tree: WorkflowTreeDefinition): OntologySeedData {
   const primaryKeys = new Map<EnterpriseId, string>();
@@ -530,28 +540,53 @@ export function getOntologyNeighbors(
     ...select("inbound").map((row) => ({ row, direction: "inbound" as const })),
   ].slice(0, params.limit);
 
-  return edges.flatMap(({ row, direction }) => {
-    const link = rowToLink(row);
-    // The neighbor is the OTHER end of the edge, whichever end we came in on.
-    const neighborEntity = direction === "outbound" ? link.toEntity : link.fromEntity;
-    const neighborId = direction === "outbound" ? link.toObjectId : link.fromObjectId;
+  const visibleEdges = edges
+    .map(({ row, direction }) => {
+      const link = rowToLink(row);
+      // The neighbor is the OTHER end of the edge, whichever end we came in on.
+      const neighborEntity = direction === "outbound" ? link.toEntity : link.fromEntity;
+      const neighborId = direction === "outbound" ? link.toObjectId : link.fromObjectId;
+      return { link, direction, neighborEntity, neighborId };
+    })
     // An edge whose far end is an object type this step cannot address is not a
     // neighbor it may walk to, even if the link type itself is in scope.
-    if (params.visibleProperties && !params.visibleProperties.has(neighborEntity)) {
-      return [];
-    }
-    const object = getOntologyObject(
-      { treeId: params.treeId, entity: neighborEntity, objectId: neighborId },
-      options,
+    .filter(
+      (edge) => !params.visibleProperties || params.visibleProperties.has(edge.neighborEntity),
     );
-    const visible = params.visibleProperties?.get(neighborEntity);
-    return [
-      {
-        link,
-        direction,
-        object: object ? projectProperties(object, visible) : null,
-      },
-    ];
+
+  // Fetch the neighbor objects in one query per distinct entity type rather than a
+  // point lookup per edge: `object_id` is the primary key, so each is one indexed
+  // read, and a traversal often lands many edges on the same few types.
+  const idsByEntity = new Map<EnterpriseId, Set<string>>();
+  for (const edge of visibleEdges) {
+    const ids = idsByEntity.get(edge.neighborEntity) ?? new Set<string>();
+    ids.add(edge.neighborId);
+    idsByEntity.set(edge.neighborEntity, ids);
+  }
+  const objectByKey = new Map<string, OntologyObjectRecord>();
+  for (const [entity, ids] of idsByEntity) {
+    const rows = executeSqliteQuerySync(
+      database.db,
+      stateDb
+        .selectFrom("enterprise_ontology_objects")
+        .selectAll()
+        .where("tree_id", "=", params.treeId)
+        .where("entity_id", "=", entity)
+        .where("object_id", "in", [...ids]),
+    ).rows as ObjectRow[];
+    for (const row of rows) {
+      objectByKey.set(JSON.stringify([entity, row.object_id]), rowToObject(row));
+    }
+  }
+
+  return visibleEdges.map((edge) => {
+    const object = objectByKey.get(JSON.stringify([edge.neighborEntity, edge.neighborId])) ?? null;
+    const visible = params.visibleProperties?.get(edge.neighborEntity);
+    return {
+      link: edge.link,
+      direction: edge.direction,
+      object: object ? projectProperties(object, visible) : null,
+    };
   });
 }
 

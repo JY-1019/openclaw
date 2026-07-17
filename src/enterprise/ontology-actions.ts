@@ -97,6 +97,11 @@ function validateParameters(
   return null;
 }
 
+// A planned write, or the model-facing reason the effect cannot be performed.
+// A closed result rather than a bare `PlannedWrite | string`, matching every
+// other result in this module (the error string is the payload, not a sentinel).
+type PlanEffectResult = { ok: true; write: PlannedWrite } | { ok: false; error: string };
+
 /**
  * Resolve one effect into a checked write.
  *
@@ -116,32 +121,47 @@ function planEffect(
     args: Record<string, OntologyValue>;
     consumed: Set<string>;
   },
-): PlannedWrite | string {
+): PlanEffectResult {
   const { database, scope, action, args, consumed } = params;
   const entity = scope.entities.get(effect.entity);
   if (!entity) {
     // Import validation resolves effect entities tree-wide, so this means the
     // action's object type is not on THIS step's path — the action is not
     // performable from where the run stands.
-    return `action "${action.id}" writes object type "${effect.entity}", which this workflow step does not declare`;
+    return {
+      ok: false,
+      error: `action "${action.id}" writes object type "${effect.entity}", which this workflow step does not declare`,
+    };
   }
   const primaryKey = primaryKeyOf(entity);
   if (!primaryKey) {
-    return `object type "${effect.entity}" declares no primaryKey, so an action cannot address an instance of it`;
+    return {
+      ok: false,
+      error: `object type "${effect.entity}" declares no primaryKey, so an action cannot address an instance of it`,
+    };
   }
   const identity = args[primaryKey];
   if (typeof identity !== "string" && typeof identity !== "number") {
-    return `action "${action.id}" must pass "${primaryKey}" to identify the "${effect.entity}" object it ${effect.kind}s`;
+    return {
+      ok: false,
+      error: `action "${action.id}" must pass "${primaryKey}" to identify the "${effect.entity}" object it ${effect.kind}s`,
+    };
   }
   // Import rejects blank and padded identities on SEEDED objects; an action must
   // not be able to create one through the other door. The tools read objectId
   // through the trimming param reader, so a row stored as "" or " C-2 " comes
   // back from search_objects with an id nothing can look up again.
   if (typeof identity === "string" && identity !== identity.trim()) {
-    return `"${primaryKey}" must not have leading or trailing whitespace: the ontology tools would trim it and lose the object`;
+    return {
+      ok: false,
+      error: `"${primaryKey}" must not have leading or trailing whitespace: the ontology tools would trim it and lose the object`,
+    };
   }
   if (typeof identity === "string" && identity.length === 0) {
-    return `"${primaryKey}" must not be blank: a blank identity cannot be addressed or traversed`;
+    return {
+      ok: false,
+      error: `"${primaryKey}" must not be blank: a blank identity cannot be addressed or traversed`,
+    };
   }
   // Type-check the identity against the primary-key PROPERTY here, before the
   // delete branch returns: an action may declare its key parameter with the wrong
@@ -151,7 +171,10 @@ function planEffect(
     (property) => property.id === primaryKey,
   );
   if (primaryKeyProperty && !ontologyValueMatchesType(identity, primaryKeyProperty.type)) {
-    return `property "${primaryKey}" of "${effect.entity}" is declared "${primaryKeyProperty.type}", but action "${action.id}" passed ${typeof identity}`;
+    return {
+      ok: false,
+      error: `property "${primaryKey}" of "${effect.entity}" is declared "${primaryKeyProperty.type}", but action "${action.id}" passed ${typeof identity}`,
+    };
   }
   const objectId = String(identity);
   consumed.add(primaryKey);
@@ -166,15 +189,15 @@ function planEffect(
   });
   if (effect.kind === "delete") {
     if (!existing) {
-      return `no "${effect.entity}" object with id "${objectId}"`;
+      return { ok: false, error: `no "${effect.entity}" object with id "${objectId}"` };
     }
-    return { entity, entityId: effect.entity, objectId, kind: "delete" };
+    return { ok: true, write: { entity, entityId: effect.entity, objectId, kind: "delete" } };
   }
   if (effect.kind === "update" && !existing) {
-    return `no "${effect.entity}" object with id "${objectId}" to update`;
+    return { ok: false, error: `no "${effect.entity}" object with id "${objectId}" to update` };
   }
   if (effect.kind === "create" && existing) {
-    return `a "${effect.entity}" object with id "${objectId}" already exists`;
+    return { ok: false, error: `a "${effect.entity}" object with id "${objectId}" already exists` };
   }
 
   // Declarative mapping: a parameter named like one of the object type's
@@ -187,12 +210,18 @@ function planEffect(
     }
     consumed.add(property.id);
     if (!ontologyValueMatchesType(value, property.type)) {
-      return `property "${property.id}" of "${effect.entity}" is declared "${property.type}", but action "${action.id}" would write ${value === null ? "null" : typeof value}`;
+      return {
+        ok: false,
+        error: `property "${property.id}" of "${effect.entity}" is declared "${property.type}", but action "${action.id}" would write ${value === null ? "null" : typeof value}`,
+      };
     }
     if (value === null && property.required) {
       // An optional parameter must not be able to null out a required property:
       // the object would then violate the type every later read assumes.
-      return `property "${property.id}" of "${effect.entity}" is required, so action "${action.id}" cannot clear it`;
+      return {
+        ok: false,
+        error: `property "${property.id}" of "${effect.entity}" is required, so action "${action.id}" cannot clear it`,
+      };
     }
     properties[property.id] = value;
   }
@@ -218,12 +247,19 @@ function planEffect(
   if (missing.length > 0) {
     // The written object must satisfy its own type, or search_objects would hand
     // the model an instance the ontology says cannot exist.
-    return effect.kind === "create"
-      ? `creating a "${effect.entity}" needs its required properties: ${missing.join(", ")}`
-      : `updating this "${effect.entity}" would leave its required properties unset: ${missing.join(", ")}`;
+    return {
+      ok: false,
+      error:
+        effect.kind === "create"
+          ? `creating a "${effect.entity}" needs its required properties: ${missing.join(", ")}`
+          : `updating this "${effect.entity}" would leave its required properties unset: ${missing.join(", ")}`,
+    };
   }
 
-  return { entity, entityId: effect.entity, objectId, kind: effect.kind, properties };
+  return {
+    ok: true,
+    write: { entity, entityId: effect.entity, objectId, kind: effect.kind, properties },
+  };
 }
 
 /**
@@ -271,15 +307,16 @@ export function invokeOntologyAction(
   const targets = new Set<string>();
   for (const effect of writeEffects) {
     const outcome = planEffect(effect, { database, scope, action, args, consumed });
-    if (typeof outcome === "string") {
-      return { ok: false, error: outcome };
+    if (!outcome.ok) {
+      return { ok: false, error: outcome.error };
     }
+    const write = outcome.write;
     // Every effect is planned against the ORIGINAL state, so two effects on the
     // SAME object cannot be composed: `delete` then `update` would delete the row
     // and then recreate it, turning a delete action into a no-op and an update
     // into a create. The ontology has no way to order effects, so an action that
     // touches one object twice is a definition bug rather than a sequence.
-    const target = `${outcome.entityId}/${outcome.objectId}`;
+    const target = `${write.entityId}/${write.objectId}`;
     if (targets.has(target)) {
       return {
         ok: false,
@@ -287,7 +324,7 @@ export function invokeOntologyAction(
       };
     }
     targets.add(target);
-    planned.push(outcome);
+    planned.push(write);
   }
 
   // APPLY: nothing below can fail on the ontology's terms.
