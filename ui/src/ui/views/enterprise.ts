@@ -2,6 +2,7 @@
 // runs, a per-execution step/trace inspector, and the workflow-tree registry.
 import { html, nothing, type TemplateResult } from "lit";
 import type {
+  EnterpriseOntologyObject,
   EnterpriseRunDetail,
   EnterpriseRunSummary,
   EnterpriseTreeDetail,
@@ -11,11 +12,21 @@ import type {
   EnterpriseTreeVersionSummary,
 } from "../../../../packages/gateway-protocol/src/index.js";
 import { t } from "../../i18n/index.ts";
-import type { OntologyEntity, OntologyRelationship } from "../components/ontology-graph.ts";
+import type { OntologyEntity } from "../components/ontology-graph.ts";
 import "../components/modal-dialog.ts";
 import "../components/ontology-graph.ts";
 import "../components/workflow-tree-graph.ts";
-import type { EnterpriseTreeConfirm, EnterpriseTreeEditFormat } from "../controllers/enterprise.ts";
+import type {
+  EnterpriseNodeDraft,
+  EnterpriseNodeDraftError,
+  EnterpriseTreeConfirm,
+  EnterpriseTreeEditFormat,
+} from "../controllers/enterprise.ts";
+import {
+  collectNodeOntologyGraph,
+  collectOntologyGraph,
+  nodeObjectEntityIds,
+} from "./enterprise-ontology-graph.ts";
 
 export type EnterpriseProps = {
   loading: boolean;
@@ -32,6 +43,12 @@ export type EnterpriseProps = {
   treeDetail: EnterpriseTreeDetail | null;
   treeLoading: boolean;
   treeIssue: string | null;
+  // P4 node inspector: which workflow node is expanded, and the object instances
+  // of the entity type currently shown for it (scoped to that node's ontology).
+  selectedNodeId: string | null;
+  nodeObjectsEntity: string | null;
+  nodeObjects: EnterpriseOntologyObject[];
+  nodeObjectsLoading: boolean;
   treeEditing: boolean;
   treeEditContent: string;
   treeEditFormat: EnterpriseTreeEditFormat;
@@ -44,6 +61,9 @@ export type EnterpriseProps = {
   // Whether the session holds operator.admin: tree import/remove are admin-only,
   // so mutation controls are hidden without it (reads stay available).
   canEdit: boolean;
+  // P5 dynamic node creation: the open "add child node" form (under a selected
+  // node), or null. Submit splices the child and loads the editor for Save.
+  nodeDraft: EnterpriseNodeDraft | null;
   error: string | null;
   onRefresh: () => void;
   onSelectRun: (executionId: string) => void;
@@ -59,6 +79,12 @@ export type EnterpriseProps = {
   onConfirm: () => void;
   onExport: (treeId: string, format: EnterpriseTreeEditFormat) => void;
   onLoadVersion: (treeId: string, revision: number) => void;
+  onSelectNode: (nodeId: string | null) => void;
+  onSelectNodeEntity: (entity: string) => void;
+  onBeginAddNode: (parentId: string) => void;
+  onEditNodeDraft: (patch: { id?: string; title?: string }) => void;
+  onCancelAddNode: () => void;
+  onSubmitAddNode: () => void;
 };
 
 function formatTime(ms: number): string {
@@ -382,7 +408,7 @@ function renderTreeVisualization(props: EnterpriseProps): TemplateResult {
         ? html`<div class="callout danger" style="margin-top: 8px;">${props.treeSaveError}</div>`
         : nothing}
       ${tree
-        ? renderTreeDetail(tree)
+        ? renderTreeDetail(tree, props)
         : html`<div class="muted" style="margin-top: 8px;">
             ${props.treeLoading ? t("common.loading") : t("enterprise.treeUnavailable")}
           </div>`}
@@ -581,7 +607,7 @@ function renderTreeConfirmModal(props: EnterpriseProps): TemplateResult | typeof
   `;
 }
 
-function renderTreeDetail(tree: EnterpriseTreeDetail): TemplateResult {
+function renderTreeDetail(tree: EnterpriseTreeDetail, props: EnterpriseProps): TemplateResult {
   const { entities, relationships } = collectOntologyGraph(tree);
   return html`
     <div class="card-sub">${tree.name} — ${tree.id}@${tree.version}</div>
@@ -590,7 +616,13 @@ function renderTreeDetail(tree: EnterpriseTreeDetail): TemplateResult {
       : nothing}
 
     <div class="card-title" style="margin-top: 16px;">${t("enterprise.structureTitle")}</div>
-    <openclaw-workflow-tree-graph .nodes=${tree.nodes}></openclaw-workflow-tree-graph>
+    <openclaw-workflow-tree-graph
+      .nodes=${tree.nodes}
+      .selected=${props.selectedNodeId}
+      @node-select=${(event: CustomEvent<{ nodeId: string | null }>) =>
+        props.onSelectNode(event.detail.nodeId)}
+    ></openclaw-workflow-tree-graph>
+    ${renderNodeInspector(tree, props)}
 
     <div class="card-title" style="margin-top: 16px;">${t("enterprise.ontologyTitle")}</div>
     ${entities.length === 0
@@ -603,77 +635,195 @@ function renderTreeDetail(tree: EnterpriseTreeDetail): TemplateResult {
 }
 
 /**
- * Union every node's entities + relationships into one graph model. Parent and
- * child nodes often re-declare the same relationship, so edges dedupe by
- * endpoints+id; otherwise the graph would stack identical arcs.
+ * The clicked node's own scope: the ontology it can address (root→node path) and
+ * the live object instances of its entity types. This is the operator-facing
+ * mirror of what the agent sees at that node — the point of P4.
  */
-export function collectOntologyGraph(tree: EnterpriseTreeDetail): {
-  entities: OntologyEntity[];
-  relationships: OntologyRelationship[];
-} {
-  const entityById = new Map<string, OntologyEntity>();
-  const relationshipByKey = new Map<string, OntologyRelationship>();
-  for (const node of tree.nodes) {
-    for (const entity of node.ontology.entities ?? []) {
-      // An object type is tree-scoped: a deeper step may EXTEND it with more
-      // properties (the schema allows exactly that, it only forbids
-      // contradicting an existing field). So properties union across
-      // declarations — keeping just the first array would hide fields a later
-      // step declared. Scalars still take the first non-empty value.
-      const merged = entityById.get(entity.id);
-      const properties = [...(merged?.properties ?? [])];
-      for (const property of entity.properties ?? []) {
-        const index = properties.findIndex((existing) => existing.id === property.id);
-        if (index < 0) {
-          properties.push(property);
-          continue;
-        }
-        // The same field re-declared: fold the two, do NOT keep only the first.
-        // The schema lets a later declaration repeat a field (it only forbids a
-        // conflicting type), and that later one may be where primaryKey or
-        // required is finally marked — dropping it would hide the PK badge.
-        const existing = properties[index];
-        properties[index] = {
-          id: existing.id,
-          type: existing.type,
-          primaryKey: existing.primaryKey || property.primaryKey,
-          required: existing.required || property.required,
-          description: existing.description ?? property.description,
-        };
-      }
-      entityById.set(entity.id, {
-        id: entity.id,
-        title: merged?.title ?? entity.title,
-        description: merged?.description ?? entity.description,
-        properties: properties.length > 0 ? properties : undefined,
-      });
-    }
-    for (const relationship of node.ontology.relationships ?? []) {
-      // Link types are tree-scoped and may be re-declared: the schema lets a
-      // deeper step fill in a cardinality or inverse the ancestor omitted (it
-      // only forbids contradicting one). Keeping the first declaration outright
-      // would render the bare ancestor link and drop that metadata.
-      const key = JSON.stringify([relationship.from, relationship.to, relationship.id]);
-      const merged = relationshipByKey.get(key);
-      relationshipByKey.set(key, {
-        id: relationship.id,
-        from: relationship.from,
-        to: relationship.to,
-        cardinality: merged?.cardinality ?? relationship.cardinality,
-        inverse: merged?.inverse ?? relationship.inverse,
-        description: merged?.description ?? relationship.description,
-      });
-    }
+function renderNodeInspector(
+  tree: EnterpriseTreeDetail,
+  props: EnterpriseProps,
+): TemplateResult | typeof nothing {
+  const nodeId = props.selectedNodeId;
+  if (!nodeId) {
+    return nothing;
   }
-  const relationships = [...relationshipByKey.values()];
-  // Link endpoints must exist as graph nodes even when the tree never declared
-  // them as object types (older trees name endpoints they never repeat).
-  for (const relationship of relationships) {
-    for (const endpoint of [relationship.from, relationship.to]) {
-      if (!entityById.has(endpoint)) {
-        entityById.set(endpoint, { id: endpoint });
-      }
-    }
+  const node = tree.nodes.find((candidate) => candidate.id === nodeId);
+  if (!node) {
+    return nothing;
   }
-  return { entities: [...entityById.values()], relationships };
+  const { entities, relationships } = collectNodeOntologyGraph(tree, nodeId);
+  // Chip list must match what the controller loads by default: only object types
+  // that can actually carry instances (a primaryKey). Derive both from the one
+  // helper so the view never offers a chip the controller would refuse to load.
+  const objectEntityIds = new Set(nodeObjectEntityIds(tree, nodeId));
+  const objectEntities = entities.filter((entity) => objectEntityIds.has(entity.id));
+  return html`
+    <section class="card-nested" style="margin-top: 12px;">
+      <div class="card-sub">${t("enterprise.nodeInspectorTitle")}: ${node.title} — ${node.id}</div>
+      ${node.description
+        ? html`<div class="muted" style="margin-top: 4px;">${node.description}</div>`
+        : nothing}
+      ${entities.length === 0
+        ? html`<div class="muted" style="margin-top: 8px;">${t("enterprise.nodeNoOntology")}</div>`
+        : html`
+            <openclaw-ontology-graph
+              .entities=${entities}
+              .relationships=${relationships}
+            ></openclaw-ontology-graph>
+            ${renderNodeObjects(objectEntities, props)}
+          `}
+      ${props.canEdit ? renderAddNode(tree.id, nodeId, props) : nothing}
+    </section>
+  `;
+}
+
+/** i18n message for a rejected node-add draft. */
+function nodeDraftErrorMessage(error: EnterpriseNodeDraftError): string {
+  const messages: Record<EnterpriseNodeDraftError, string> = {
+    "id-empty": t("enterprise.addNodeErrorIdEmpty"),
+    "id-pattern": t("enterprise.addNodeErrorIdPattern"),
+    "id-duplicate": t("enterprise.addNodeErrorIdDuplicate"),
+    "title-empty": t("enterprise.addNodeErrorTitleEmpty"),
+    "parent-missing": t("enterprise.addNodeErrorParentMissing"),
+    "export-failed": t("enterprise.addNodeErrorExportFailed"),
+  };
+  return messages[error];
+}
+
+/**
+ * The "add child node" affordance under the selected node: a button that opens an
+ * inline form (new-node id + title). Submitting splices a bare child into the
+ * tree definition and loads the editor to review + Save, so creation reuses the
+ * existing import path. Admin-only (the caller gates on canEdit).
+ */
+function renderAddNode(treeId: string, nodeId: string, props: EnterpriseProps): TemplateResult {
+  // Match the tree too: a draft under a node id shared by another tree (e.g. a
+  // root named "root") must not resurface here after a tree switch.
+  const draft =
+    props.nodeDraft?.treeId === treeId && props.nodeDraft.parentId === nodeId
+      ? props.nodeDraft
+      : null;
+  if (!draft) {
+    return html`
+      <button
+        type="button"
+        class="btn"
+        style="margin-top: 12px;"
+        @click=${() => props.onBeginAddNode(nodeId)}
+      >
+        ${t("enterprise.addNodeButton")}
+      </button>
+    `;
+  }
+  const fieldStyle =
+    "width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text);";
+  return html`
+    <div class="card-nested" style="margin-top: 12px;">
+      <div class="card-sub">${t("enterprise.addNodeTitle")}</div>
+      <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 8px;">
+        <label style="display: flex; flex-direction: column; gap: 4px;">
+          <span class="muted">${t("enterprise.addNodeIdLabel")}</span>
+          <input
+            style=${fieldStyle}
+            .value=${draft.id}
+            placeholder=${`${nodeId}.step`}
+            @input=${(event: Event) =>
+              props.onEditNodeDraft({ id: (event.target as HTMLInputElement).value })}
+          />
+        </label>
+        <label style="display: flex; flex-direction: column; gap: 4px;">
+          <span class="muted">${t("enterprise.addNodeTitleLabel")}</span>
+          <input
+            style=${fieldStyle}
+            .value=${draft.title}
+            @input=${(event: Event) =>
+              props.onEditNodeDraft({ title: (event.target as HTMLInputElement).value })}
+          />
+        </label>
+        ${draft.error
+          ? html`<div class="callout danger">${nodeDraftErrorMessage(draft.error)}</div>`
+          : nothing}
+        <div class="row" style="gap: 8px;">
+          <button type="button" class="btn primary" @click=${props.onSubmitAddNode}>
+            ${t("enterprise.addNodeSubmit")}
+          </button>
+          <button type="button" class="btn" @click=${props.onCancelAddNode}>
+            ${t("common.cancel")}
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderNodeObjects(
+  objectEntities: OntologyEntity[],
+  props: EnterpriseProps,
+): TemplateResult | typeof nothing {
+  if (objectEntities.length === 0) {
+    return nothing;
+  }
+  const active = props.nodeObjectsEntity ?? objectEntities[0]?.id ?? null;
+  return html`
+    <div class="card-title" style="margin-top: 12px;">${t("enterprise.nodeObjectsTitle")}</div>
+    <div class="row" style="gap: 6px; flex-wrap: wrap; margin-top: 8px;">
+      ${objectEntities.map(
+        (entity) => html`
+          <button
+            type="button"
+            class="chip ${entity.id === active ? "chip-active" : ""}"
+            @click=${() => props.onSelectNodeEntity(entity.id)}
+          >
+            ${entity.title ?? entity.id}
+          </button>
+        `,
+      )}
+    </div>
+    ${props.nodeObjectsLoading
+      ? html`<div class="muted" style="margin-top: 8px;">${t("common.loading")}</div>`
+      : renderObjectTable(props.nodeObjects)}
+  `;
+}
+
+function renderObjectTable(objects: EnterpriseOntologyObject[]): TemplateResult {
+  if (objects.length === 0) {
+    return html`<div class="muted" style="margin-top: 8px;">${t("enterprise.nodeNoObjects")}</div>`;
+  }
+  // The property union across the returned rows is the column set: instances of
+  // one type may carry different optional fields, and a fixed column list would
+  // hide whichever the first row happened to omit.
+  const columns = [...new Set(objects.flatMap((object) => Object.keys(object.properties)))];
+  return html`
+    <div class="table-scroll" style="margin-top: 8px;">
+      <table class="mini-table">
+        <thead>
+          <tr>
+            <th>id</th>
+            ${columns.map((column) => html`<th>${column}</th>`)}
+            <th>source</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${objects.map(
+            (object) => html`
+              <tr>
+                <td><code>${object.objectId}</code></td>
+                ${columns.map(
+                  (column) => html`<td>${formatOntologyValue(object.properties[column])}</td>`,
+                )}
+                <td><span class="muted">${object.provenance}</span></td>
+              </tr>
+            `,
+          )}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function formatOntologyValue(value: string | number | boolean | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  return String(value);
 }

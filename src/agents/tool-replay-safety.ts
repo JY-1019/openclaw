@@ -22,6 +22,11 @@ const UNCONDITIONALLY_REPLAY_SAFE_TOOL_NAMES = new Set([
   "tool_search",
   "tool_describe",
   "image",
+  // Ontology READS. invoke_action is deliberately absent: it writes, so it is a
+  // mutating tool and a blind retry must not repeat it.
+  "search_objects",
+  "get_neighbors",
+  "compute_function",
 ]);
 
 /**

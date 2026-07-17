@@ -7,16 +7,15 @@
 # --------------------
 # This is the route-finding fixture. One tree, 40 nodes, depth 5.
 #
-# CURRENT BEHAVIOR (read this before drawing conclusions from a run): the runtime
-# still plans the WHOLE selected subtree — buildEnterpriseRunPlan flattens the
-# tree root and the step loop advances through every leaf. Subtree route
-# selection is not implemented yet. So today this tree exercises the ontology,
-# the governance scopes, and the Enterprise-tab visualization at realistic scale;
-# it does NOT yet prove that a narrow route was chosen.
+# CURRENT BEHAVIOR: the route planner selects cut points and the run plans exactly
+# their subtrees plus the ancestors above them (selectWorkflowRoute →
+# resolveRouteNodeIds → buildEnterpriseRunPlan). Ancestors are kept on purpose:
+# governance merges every ontology down the root→active path, so dropping one
+# would drop the tool ceiling it declares. A planner that has no opinion, times
+# out, or fails falls back to the whole tree — less precise, never less governed.
 #
-# It is shaped for that upcoming route planner: the point of a 40-node tree is
-# that picking the right subtree is a real problem, so it is seeded with
-# deliberately confusable siblings and cross-domain traps:
+# The point of a 40-node tree is that picking the right subtree is a real problem,
+# so it is seeded with deliberately confusable siblings and cross-domain traps:
 #
 #   finops.risk.monitoring.alert-triage   vs  finops.claims.intake.triage
 #   finops.risk.underwriting.decision     vs  finops.claims.adjudication.decision
@@ -34,8 +33,16 @@
 # primaryKey each) and link types with cardinality. Every step below operates ON
 # that ontology — leaf nodes declare action types whose `effects` name exactly
 # which object type they read, create, update, or delete, and bind those actions
-# to concrete tools. Governance can then scope a policy at the action level and
-# it means something enforceable, not just a naming convention.
+# to concrete tools.
+#
+# WHAT IS ACTUALLY ENFORCED TODAY (do not read more into the fields than this):
+# only `allowedTools`/`deniedTools` (an independent gate at every node on the
+# root→active path), `knowledgeFoundations`, and `audit`. An action-scoped policy
+# resolves through the action's `tools` globs. The semantic fields below —
+# property types, primaryKey, cardinality, action `parameters`, `preconditions`,
+# `effects`, and `constraints` — are validated on import and rendered into the
+# prompt digest and the Enterprise tab, but nothing gates on their VALUES yet.
+# Treat `preconditions` and `constraints` as advice to the model, not invariants.
 schema: clawworks.workflow-tree
 schemaVersion: 1
 id: acme.financial-operations
@@ -241,8 +248,103 @@ root:
         cardinality: one-to-many
         inverse: sar-included-in
 
+    # ---- Derived values (read-only counterpart to actions) ----
+    # An expression is NOT JavaScript: it is evaluated by a closed, total op set
+    # (see src/enterprise/ontology-expression.ts), because a tree is imported data
+    # and evaluating it as code would make "import a tree" mean "run arbitrary
+    # code". Properties are referenced with a `$` sigil, since ontology ids are
+    # hyphenated and a bare `claimed-amount` would lex as subtraction.
+    #
+    # These parse and resolve their `$` refs at IMPORT: a typo fails the import
+    # with a path rather than surfacing as a dud value midway through a run.
+    functions:
+      - id: claim-triage-band
+        title: Claim triage band
+        description: Which lane a claim should be worked in, from its own fields.
+        entity: claim
+        expression: "$fraud-score >= 80 ? 'refer' : ($claimed-amount > 10000 ? 'review' : 'auto')"
+        returns: string
+      - id: alert-is-high-risk
+        title: Alert is high risk
+        description: Whether a monitoring alert clears the escalation threshold.
+        entity: alert
+        expression: "$score >= 75"
+        returns: boolean
+      # A function reads only its OWN object type's properties, so a value that
+      # depends on another object (say, capping this at the policy's
+      # coverage-limit) is NOT expressible here — that needs a link traversal.
+      # Do not describe a function as doing something its expression cannot do.
+      - id: claim-amount-or-zero
+        title: Claim amount, or zero
+        description: The claimed amount, treating an unset amount as zero.
+        entity: claim
+        expression: "coalesce($claimed-amount, 0)"
+        returns: number
+
+    # ---- Seeded object INSTANCES ----
+    # The tree declares the objects a step works on, and they are materialized into
+    # SQLite on import. This is the exchange format; the runtime reads and writes
+    # only the store. A re-import re-applies these (the tree owns what it declares)
+    # and never touches objects an action created during a run.
+    #
+    # Identity is the value of each object type's primaryKey property, which is why
+    # `claim/CLM-1042` and `$claim-id` in an expression name the same thing.
+    objects:
+      - entity: customer
+        properties:
+          customer-id: CUST-8801
+          legal-name: Meridian Freight Ltd
+          jurisdiction: GB
+          risk-rating: medium
+      - entity: policy
+        properties:
+          policy-id: POL-4417
+          coverage-limit: 250000
+          effective-from: "2025-11-01"
+      - entity: claim
+        properties:
+          claim-id: CLM-1042
+          claimed-amount: 84000
+          status: intake
+          fraud-score: 91
+      - entity: claim
+        properties:
+          claim-id: CLM-1043
+          claimed-amount: 2300
+          status: intake
+          fraud-score: 12
+      - entity: claim
+        properties:
+          claim-id: CLM-1044
+          claimed-amount: 46000
+          status: adjudicating
+          fraud-score: 38
+      - entity: document
+        properties:
+          document-id: DOC-9001
+          kind: invoice
+          verified: false
+      - entity: document
+        properties:
+          document-id: DOC-9002
+          kind: photo
+          verified: false
+
+    links:
+      - { relationship: customer-holds-policy, from: CUST-8801, to: POL-4417 }
+      - { relationship: claim-against-policy, from: CLM-1042, to: POL-4417 }
+      - { relationship: claim-against-policy, from: CLM-1043, to: POL-4417 }
+      - { relationship: claim-against-policy, from: CLM-1044, to: POL-4417 }
+      - { relationship: claim-evidenced-by-document, from: CLM-1042, to: DOC-9001 }
+      - { relationship: claim-evidenced-by-document, from: CLM-1042, to: DOC-9002 }
+
     # Root tool floor: nothing under this tree runs shell or process tools, in any
     # step. Deny wins over any descendant's allow, so this is a hard ceiling.
+    #
+    # The ontology tools must also be allowed at the ROOT, not only on the leaf that
+    # uses them: allowedTools is an independent gate at EVERY node on the root→leaf
+    # path, so a root that scopes tools without listing these would deny them at
+    # every step below. (This is the trap knowledge_search already hit.)
     deniedTools: [exec, process, browser]
     contextHints:
       - Cite the object type and primary key of anything you assert (e.g. claim-id CLM-1042).
@@ -632,15 +734,39 @@ root:
                 ALERTS. This one triages CLAIMS against a policy.
               ontology:
                 actions:
+                  # The `effects` below are this action's AUTHORIZATION, not a
+                  # description of it. invoke_action may only touch the object types
+                  # they name, in the way they name: this one can update a claim and
+                  # read a policy, and it cannot delete anything or touch a document.
+                  #
+                  # Parameters map to properties by id: `status` is a property of
+                  # `claim`, so it is written; `claim-id` is claim's primaryKey, so it
+                  # says WHICH claim; `rationale` matches no property, so it is the
+                  # operator's evidence and lands in the audit trail instead.
                   - id: triage-claim
                     title: Triage claim
-                    tools: [knowledge_search, memory_search]
                     parameters:
                       - { id: claim-id, type: id, required: true }
+                      - { id: status, type: string, required: true }
+                      - { id: rationale, type: string, required: true }
+                    preconditions:
+                      - Compute the claim's triage band before setting its status.
                     effects:
-                      - { entity: claim, kind: update, description: Sets claim.status to adjudicating. }
+                      - { entity: claim, kind: update, description: Sets claim.status. }
                       - { entity: policy, kind: read }
-                allowedTools: [knowledge_search, memory_search]
+                # This step works ON the object graph: it searches claims, walks to
+                # the policy they are filed against, computes the triage band, and
+                # writes the outcome back through a declared action — rather than
+                # being told about any of it in prose.
+                allowedTools:
+                  [
+                    knowledge_search,
+                    memory_search,
+                    search_objects,
+                    get_neighbors,
+                    compute_function,
+                    invoke_action,
+                  ]
                 knowledgeFoundations: [acme.claims-handbook]
                 expectedOutput: The claim's class and where it is routed next.
             - id: finops.claims.intake.coverage-check

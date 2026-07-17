@@ -2633,6 +2633,45 @@
   background: var(--danger-subtle);
 }
 
+/* Selected object-type chip in the enterprise node inspector. */
+.chip-active {
+  color: var(--fg);
+  border-color: var(--accent);
+  background: var(--accent-subtle, var(--secondary));
+}
+
+/* Enterprise node inspector: a nested box under the workflow-tree graph. */
+.card-nested {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: var(--bg-accent, var(--card));
+}
+
+/* Compact object-instance table (node inspector). Scrolls inside its own box. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.mini-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+}
+
+.mini-table th,
+.mini-table td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.mini-table th {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 /* ===========================================
    Tables
    =========================================== */

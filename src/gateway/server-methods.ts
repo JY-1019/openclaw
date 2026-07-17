@@ -340,6 +340,7 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
     methods: [
       "enterprise.trees.list",
       "enterprise.trees.get",
+      "enterprise.objects.list",
       "enterprise.trees.import",
       "enterprise.trees.export",
       "enterprise.trees.remove",

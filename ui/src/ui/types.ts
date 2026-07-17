@@ -579,6 +579,7 @@ export type {
 } from "./usage-types.ts";
 
 export type {
+  EnterpriseOntologyObject,
   EnterpriseRunDetail,
   EnterpriseRunSummary,
   EnterpriseTreeDetail,

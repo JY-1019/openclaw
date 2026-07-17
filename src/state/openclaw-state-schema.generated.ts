@@ -1290,4 +1290,59 @@ CREATE TABLE IF NOT EXISTS enterprise_workflow_tree_versions (
   source_format TEXT NOT NULL,
   saved_at INTEGER NOT NULL,
   PRIMARY KEY (tree_id, revision)
-);\n`;
+);
+
+-- Ontology object INSTANCES, keyed by the tree that declares their type.
+--
+-- Scoped by tree_id, not by agent or run: the object TYPE lives in the tree's
+-- ontology, the tree is global (keyed by tree_id alone, loaded through a
+-- process-global registry, edited by operator.admin), and an instance store
+-- cannot be scoped narrower than the definition of its own type. Run provenance
+-- rides along as nullable columns, exactly as enterprise_runs carries agent_id.
+--
+-- No FOREIGN KEY on tree_id: BUILT-IN trees are code, not rows in
+-- enterprise_workflow_trees, so an FK would make objects impossible for them.
+-- removeImportedWorkflowTree deletes these rows inside its own write
+-- transaction instead; a tree removal must not leave its objects orphaned.
+CREATE TABLE IF NOT EXISTS enterprise_ontology_objects (
+  tree_id TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  -- The value of the object type's primaryKey property.
+  object_id TEXT NOT NULL,
+  -- 'seed' rows are declared BY the tree and are re-applied on every import, so
+  -- the tree stays the source of truth for what it declares. 'runtime' rows were
+  -- created by an action during a run and are never clobbered by a re-import.
+  provenance TEXT NOT NULL,
+  properties_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (tree_id, entity_id, object_id)
+);
+
+-- search_objects filters by object type within one tree, newest first.
+CREATE INDEX IF NOT EXISTS idx_enterprise_ontology_objects_entity
+  ON enterprise_ontology_objects(tree_id, entity_id, updated_at DESC, object_id);
+
+-- Instance-level links between objects. The TYPE-level link (which object types
+-- may relate, and with what cardinality) is declared in the tree's ontology;
+-- this is which concrete objects actually relate, and it is what get_neighbors
+-- traverses.
+CREATE TABLE IF NOT EXISTS enterprise_ontology_links (
+  tree_id TEXT NOT NULL,
+  relationship_id TEXT NOT NULL,
+  from_entity_id TEXT NOT NULL,
+  from_object_id TEXT NOT NULL,
+  to_entity_id TEXT NOT NULL,
+  to_object_id TEXT NOT NULL,
+  provenance TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (tree_id, relationship_id, from_object_id, to_object_id)
+);
+
+-- Traversal is by (tree, source object): "what is linked to THIS object".
+CREATE INDEX IF NOT EXISTS idx_enterprise_ontology_links_from
+  ON enterprise_ontology_links(tree_id, from_entity_id, from_object_id, relationship_id);
+
+-- The inverse traversal reads the same edge backwards, so it needs its own index.
+CREATE INDEX IF NOT EXISTS idx_enterprise_ontology_links_to
+  ON enterprise_ontology_links(tree_id, to_entity_id, to_object_id, relationship_id);\n`;

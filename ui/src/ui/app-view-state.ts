@@ -41,6 +41,7 @@ import type {
   LogEntry,
   LogLevel,
   ChatModelOverride,
+  EnterpriseOntologyObject,
   EnterpriseRunDetail,
   EnterpriseRunSummary,
   EnterpriseTreeDetail,
@@ -305,6 +306,10 @@ export type AppViewState = {
   enterpriseTreeDetail: EnterpriseTreeDetail | null;
   enterpriseTreeLoading: boolean;
   enterpriseTreeIssue: string | null;
+  enterpriseSelectedNodeId: string | null;
+  enterpriseNodeObjectsEntity: string | null;
+  enterpriseNodeObjects: EnterpriseOntologyObject[];
+  enterpriseNodeObjectsLoading: boolean;
   enterpriseTreeEditing: boolean;
   enterpriseTreeEditTreeId: string | null;
   enterpriseTreeEditRevision: number | null;
@@ -316,6 +321,7 @@ export type AppViewState = {
   enterpriseTreeConfirm: import("./controllers/enterprise.js").EnterpriseTreeConfirm | null;
   enterpriseTreeVersions: EnterpriseTreeVersionSummary[];
   enterpriseTreeVersionsLoading: boolean;
+  enterpriseNodeDraft: import("./controllers/enterprise.js").EnterpriseNodeDraft | null;
   enterpriseError: string | null;
   agentsLoading: boolean;
   agentsList: AgentsListResult | null;

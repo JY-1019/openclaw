@@ -58,6 +58,47 @@ function actionsCoveringTool(
 }
 
 /**
+ * Does an `actions`-scoped policy cover this call?
+ *
+ * When the call NAMES an action (invoke_action), that action is the subject and
+ * nothing else is: matching the covering set instead would make a policy scoped
+ * to "refund" fire for invoke_action("read-note") too, purely because some action
+ * happens to list invoke_action among its tools. The gate finally sees which
+ * action the model chose, so it uses it.
+ *
+ * For every other tool there is no named action, and the covering set (actions
+ * whose `tools` globs reach this tool) remains the only signal available.
+ */
+function actionSelectorMatches(
+  policy: GovernancePolicy,
+  params: {
+    coveringActions: readonly OntologyAction[];
+    actionId?: string;
+    carriesAction?: boolean;
+    /** Action ids the active root→node path declares. */
+    declaredActions: ReadonlySet<string>;
+  },
+): boolean {
+  if (params.carriesAction) {
+    // The action is NAMED in the call, never inferred from tool globs. Until it is
+    // named it cannot be judged: falling back to the covering set here would let a
+    // policy denying "refund" block an `invoke_action` whose action a hook has not
+    // filled in yet — and which may turn out to be something else entirely. The
+    // authoritative decision is taken on the final params.
+    //
+    // The name must also be one the active step actually DECLARES. A model can put
+    // any string there, and the tool will reject an undeclared one anyway — but a
+    // require_approval or audit policy would otherwise fire on it first, letting a
+    // made-up action id prompt a human or write an audit entry.
+    if (params.actionId === undefined || !params.declaredActions.has(params.actionId)) {
+      return false;
+    }
+    return matchesSelector(params.actionId, policy.actions);
+  }
+  return params.coveringActions.some((action) => matchesSelector(action.id, policy.actions));
+}
+
+/**
  * First node on the root→active path whose ontology tool scope rejects the
  * call, or null when every level allows it. Each level is an independent gate:
  * a tool must satisfy the allow/deny lists of every ancestor, so a leaf cannot
@@ -91,6 +132,12 @@ function policyAppliesToToolCall(
     path: readonly EnterprisePlanNode[];
     toolName: string;
     coveringActions: readonly OntologyAction[];
+    /** The ontology action the model actually invoked, when the call names one. */
+    actionId?: string;
+    /** This tool's subject is an action carried in its params (invoke_action). */
+    carriesAction?: boolean;
+    /** Action ids the active root→node path declares. */
+    declaredActions: ReadonlySet<string>;
   },
 ): boolean {
   const toolScoped = Boolean(policy.tools?.length);
@@ -107,10 +154,7 @@ function policyAppliesToToolCall(
   if (toolScoped && !matchesSelector(params.toolName, policy.tools)) {
     return false;
   }
-  if (
-    actionScoped &&
-    !params.coveringActions.some((action) => matchesSelector(action.id, policy.actions))
-  ) {
+  if (actionScoped && !actionSelectorMatches(policy, params)) {
     return false;
   }
   // Node-scoped policies match any node on the active step's root→active path,
@@ -145,6 +189,16 @@ export function evaluateToolCallGovernance(params: {
   toolName: string;
   policies: readonly GovernancePolicy[];
   path?: readonly EnterprisePlanNode[];
+  /**
+   * The ontology action the call names (invoke_action). Present only for calls
+   * that carry one; every other tool leaves it undefined.
+   */
+  actionId?: string;
+  /**
+   * This tool takes its action from its PARAMS rather than its name. Such a call
+   * cannot be judged by an action-scoped policy until the action is known.
+   */
+  carriesAction?: boolean;
 }): GovernanceDecision {
   const path = params.path ?? [params.node];
   const violation = ontologyScopeViolation(path, params.toolName);
@@ -158,15 +212,26 @@ export function evaluateToolCallGovernance(params: {
   }
 
   const coveringActions = actionsCoveringTool(path, params.toolName);
+  const declaredActions = new Set(
+    path.flatMap((node) => (node.ontology.actions ?? []).map((action) => action.id)),
+  );
   const matching = params.policies.filter((policy) =>
     policyAppliesToToolCall(policy, {
       treeId: params.plan.treeId,
       path,
       toolName: params.toolName,
       coveringActions,
+      declaredActions,
+      ...(params.actionId !== undefined ? { actionId: params.actionId } : {}),
+      ...(params.carriesAction ? { carriesAction: true } : {}),
     }),
   );
-  const decision = resolvePolicyDecision(matching, () => `tool "${params.toolName}"`);
+  // Name the ACTION in the reason when the call carried one: an operator reading
+  // "action \"refund\" is denied" can act on it; "tool invoke_action is denied"
+  // tells them nothing about which of a node's actions tripped the policy.
+  const subject =
+    params.actionId !== undefined ? `action "${params.actionId}"` : `tool "${params.toolName}"`;
+  const decision = resolvePolicyDecision(matching, () => subject);
   if (decision) {
     return decision;
   }

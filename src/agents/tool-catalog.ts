@@ -56,6 +56,12 @@ const CORE_TOOL_SECTION_ORDER: Array<{ id: string; label: string }> = [
   { id: "agents", label: "Agents" },
   { id: "media", label: "Media" },
   { id: "enterprise", label: "Enterprise" },
+  // Its own section, and therefore its own `group:enterprise-write`. The ontology
+  // WRITE tool must not ride into an allowlist that already says
+  // `group:enterprise`: that group has only ever meant read/inspect, so folding a
+  // store-mutating tool into it would grant ontology writes on upgrade to
+  // operators who never opted in.
+  { id: "enterprise-write", label: "Enterprise (write)" },
 ];
 
 const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
@@ -275,6 +281,44 @@ const CORE_TOOL_DEFINITIONS: CoreToolDefinition[] = [
     label: "knowledge_search",
     description: "Search enterprise knowledge foundations",
     sectionId: "enterprise",
+    profiles: [],
+    includeInOpenClawGroup: false,
+  },
+  // The ontology tools. Same enterprise-only shape as knowledge_search: an
+  // operator who already wrote `allow: ["group:openclaw"]` must not silently
+  // gain the ability to read or mutate a governed object graph.
+  {
+    id: "search_objects",
+    label: "search_objects",
+    description: "Search ontology objects in the current workflow step",
+    sectionId: "enterprise",
+    profiles: [],
+    includeInOpenClawGroup: false,
+  },
+  {
+    id: "get_neighbors",
+    label: "get_neighbors",
+    description: "Walk ontology links from one object",
+    sectionId: "enterprise",
+    profiles: [],
+    includeInOpenClawGroup: false,
+  },
+  {
+    id: "compute_function",
+    label: "compute_function",
+    description: "Evaluate a declared ontology function over an object",
+    sectionId: "enterprise",
+    profiles: [],
+    includeInOpenClawGroup: false,
+  },
+  {
+    // Deliberately NOT sectionId "enterprise": see CORE_TOOL_SECTION_ORDER. This
+    // is the only ontology tool that writes, so it gets its own group and has to
+    // be allowed by name or via `group:enterprise-write`.
+    id: "invoke_action",
+    label: "invoke_action",
+    description: "Run a declared ontology action (writes to the object store)",
+    sectionId: "enterprise-write",
     profiles: [],
     includeInOpenClawGroup: false,
   },

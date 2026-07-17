@@ -2,9 +2,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { GatewayRequestError } from "../gateway.ts";
 import {
+  beginAddEnterpriseNode,
   beginEditEnterpriseTree,
   beginNewEnterpriseTree,
+  cancelAddEnterpriseNode,
   confirmEnterpriseTreeAction,
+  editEnterpriseNodeDraft,
   type EnterpriseState,
   exportEnterpriseTree,
   loadEnterprise,
@@ -18,6 +21,7 @@ import {
   selectEnterpriseTree,
   setEnterpriseTreeEditContent,
   setEnterpriseTreeEditFormat,
+  submitAddEnterpriseNode,
 } from "./enterprise.ts";
 
 type TestRequest = (method: string, payload?: unknown) => Promise<unknown>;
@@ -40,6 +44,10 @@ function createState(): { state: EnterpriseState; request: ReturnType<typeof vi.
     enterpriseTreeDetail: null,
     enterpriseTreeLoading: false,
     enterpriseTreeIssue: null,
+    enterpriseSelectedNodeId: null,
+    enterpriseNodeObjectsEntity: null,
+    enterpriseNodeObjects: [],
+    enterpriseNodeObjectsLoading: false,
     enterpriseTreeEditing: false,
     enterpriseTreeEditTreeId: null,
     enterpriseTreeEditRevision: null,
@@ -51,6 +59,7 @@ function createState(): { state: EnterpriseState; request: ReturnType<typeof vi.
     enterpriseTreeConfirm: null,
     enterpriseTreeVersions: [],
     enterpriseTreeVersionsLoading: false,
+    enterpriseNodeDraft: null,
     enterpriseError: null,
   };
   return { state, request };
@@ -443,6 +452,139 @@ describe("loadEnterpriseTreeDetail", () => {
     expect(state.enterpriseSelectedTreeId).toBeNull();
     expect(state.enterpriseTreeDetail).toBeNull();
     expect(state.enterpriseError).toContain("operator.read");
+  });
+});
+
+function treeWithObjectEntity(id: string, entityId: string) {
+  return {
+    id,
+    version: "1.0.0",
+    name: `Tree ${id}`,
+    source: "imported" as const,
+    nodes: [
+      {
+        id: `${id}.root`,
+        parentId: null,
+        depth: 0,
+        title: "Root",
+        ontology: {
+          entities: [{ id: entityId, properties: [{ id: "cid", type: "id", primaryKey: true }] }],
+        },
+      },
+    ],
+  };
+}
+
+function objectRow(objectId: string) {
+  return { objectId, properties: { cid: objectId }, provenance: "seed" as const, updatedAt: 1 };
+}
+
+// All request mocks below are pre-resolved, so a few microtask ticks flush the
+// fire-and-forget objects.list the reconcile kicks off after the tree renders.
+async function flushMicrotasks() {
+  for (let i = 0; i < 5; i++) {
+    await Promise.resolve();
+  }
+}
+
+describe("loadEnterpriseTreeDetail node-selection reconcile", () => {
+  it("reloads the selected node's instances when the same tree is refreshed", async () => {
+    const { state, request } = createState();
+    const nodeId = "acme.support.root";
+    state.enterpriseSelectedTreeId = "acme.support";
+    state.enterpriseSelectedNodeId = nodeId;
+    state.enterpriseNodeObjectsEntity = "claim";
+    state.enterpriseNodeObjects = [objectRow("old-1")];
+    request.mockImplementation((method) => {
+      if (method === "enterprise.trees.get") {
+        return Promise.resolve({ tree: treeWithObjectEntity("acme.support", "claim") });
+      }
+      return Promise.resolve({ objects: [objectRow("fresh-1")] });
+    });
+
+    await loadEnterpriseTreeDetail(state, "acme.support");
+    await flushMicrotasks();
+
+    // Node survives the re-import, so the operator's chosen type stays selected
+    // but its rows are re-fetched — the stale "old-1" must be gone.
+    expect(state.enterpriseSelectedNodeId).toBe(nodeId);
+    expect(state.enterpriseNodeObjectsEntity).toBe("claim");
+    expect(state.enterpriseNodeObjects.map((object) => object.objectId)).toEqual(["fresh-1"]);
+  });
+
+  it("drops the node selection when a refresh removes the selected node", async () => {
+    const { state, request } = createState();
+    state.enterpriseSelectedTreeId = "acme.support";
+    // Selected node is absent from the reloaded tree (only *.root survives).
+    state.enterpriseSelectedNodeId = "acme.support.gone";
+    state.enterpriseNodeObjectsEntity = "claim";
+    state.enterpriseNodeObjects = [objectRow("old-1")];
+    request.mockResolvedValue({ tree: treeWithObjectEntity("acme.support", "claim") });
+
+    await loadEnterpriseTreeDetail(state, "acme.support");
+    await flushMicrotasks();
+
+    expect(state.enterpriseSelectedNodeId).toBeNull();
+    expect(state.enterpriseNodeObjectsEntity).toBeNull();
+    expect(state.enterpriseNodeObjects).toEqual([]);
+    // A vanished node needs no instance fetch.
+    expect(request).not.toHaveBeenCalledWith("enterprise.objects.list", expect.anything());
+  });
+
+  it("drops the selection when a different tree opens, even on a shared node id", async () => {
+    const { state, request } = createState();
+    // Prior tree had node "acme.a.root" selected; the newly opened tree also has
+    // a "*.root" node, but the selection must NOT carry across.
+    state.enterpriseSelectedTreeId = "acme.a";
+    state.enterpriseSelectedNodeId = "acme.a.root";
+    state.enterpriseNodeObjectsEntity = "claim";
+    state.enterpriseNodeObjects = [objectRow("old-1")];
+    request.mockResolvedValue({ tree: treeWithObjectEntity("acme.b", "claim") });
+
+    // A save/import flow opens a different tree directly (not via selectEnterpriseTree).
+    await loadEnterpriseTreeDetail(state, "acme.b");
+    await flushMicrotasks();
+
+    expect(state.enterpriseSelectedNodeId).toBeNull();
+    expect(state.enterpriseNodeObjects).toEqual([]);
+    expect(request).not.toHaveBeenCalledWith("enterprise.objects.list", expect.anything());
+  });
+
+  it("clears the selection eagerly when a tree switch fails to load", async () => {
+    const { state, request } = createState();
+    state.enterpriseSelectedTreeId = "acme.a";
+    state.enterpriseSelectedNodeId = "acme.a.root";
+    state.enterpriseNodeObjects = [objectRow("old-1")];
+    request.mockRejectedValue(new Error("network down"));
+
+    // The load fails, but the selection must already be gone: it was cleared
+    // before the request so a retry can't mistake a shared id for a same-tree hit.
+    await loadEnterpriseTreeDetail(state, "acme.b");
+
+    expect(state.enterpriseSelectedTreeId).toBe("acme.b");
+    expect(state.enterpriseSelectedNodeId).toBeNull();
+    expect(state.enterpriseNodeObjects).toEqual([]);
+  });
+
+  it("does not reconcile a same-tree refresh that returns a non-authoritative fallback", async () => {
+    const { state, request } = createState();
+    state.enterpriseSelectedTreeId = "acme.support";
+    state.enterpriseSelectedNodeId = "acme.support.root";
+    state.enterpriseNodeObjectsEntity = "claim";
+    state.enterpriseNodeObjects = [objectRow("old-1")];
+    // The override failed to parse: the store returns a stale built-in fallback,
+    // whose ontology may not match the selection, so rows must not auto-load.
+    request.mockResolvedValue({
+      tree: treeWithObjectEntity("acme.support", "claim"),
+      importError: "definition_json invalid",
+    });
+
+    await loadEnterpriseTreeDetail(state, "acme.support");
+    await flushMicrotasks();
+
+    expect(state.enterpriseSelectedNodeId).toBeNull();
+    expect(state.enterpriseNodeObjects).toEqual([]);
+    expect(request).not.toHaveBeenCalledWith("enterprise.objects.list", expect.anything());
   });
 });
 
@@ -1177,5 +1319,174 @@ describe("enterprise tree editing", () => {
     // The stale list is dropped immediately so the panel shows loading, not A's.
     expect(state.enterpriseTreeVersions).toEqual([]);
     expect(state.enterpriseTreeVersionsLoading).toBe(true);
+  });
+});
+
+// The nested definition enterprise.trees.export serializes; its root id matches
+// the flat detail node id treeDetail() builds ("<treeId>.root").
+function supportExportContent(): string {
+  return JSON.stringify({
+    schema: "clawworks.workflow-tree",
+    schemaVersion: 1,
+    id: "acme.support",
+    version: "1.0.0",
+    name: "Support",
+    root: {
+      id: "acme.support.root",
+      title: "Root",
+      ontology: { entities: [{ id: "a" }] },
+    },
+  });
+}
+
+describe("add child node (P5)", () => {
+  it("beginAddEnterpriseNode opens a draft scoped to the current tree", () => {
+    const { state } = createState();
+    state.enterpriseTreeDetail = treeDetail("acme.support");
+    beginAddEnterpriseNode(state, "acme.support.root");
+    expect(state.enterpriseNodeDraft).toEqual({
+      treeId: "acme.support",
+      parentId: "acme.support.root",
+      id: "",
+      title: "",
+      error: null,
+    });
+  });
+
+  it("does not open a draft when no tree is loaded", () => {
+    const { state } = createState();
+    beginAddEnterpriseNode(state, "acme.support.root");
+    expect(state.enterpriseNodeDraft).toBeNull();
+  });
+
+  it("clears an open draft when the operator switches trees", () => {
+    const { state, request } = createState();
+    state.enterpriseTreeDetail = treeDetail("acme.support");
+    request.mockResolvedValue({ tree: treeDetail("acme.other") });
+    beginAddEnterpriseNode(state, "acme.support.root");
+    selectEnterpriseTree(state, "acme.other");
+    expect(state.enterpriseNodeDraft).toBeNull();
+  });
+
+  it("editing the draft updates fields and clears a prior error", () => {
+    const { state } = createState();
+    state.enterpriseNodeDraft = {
+      treeId: "acme.support",
+      parentId: "acme.support.root",
+      id: "bad id",
+      title: "",
+      error: "id-pattern",
+    };
+    editEnterpriseNodeDraft(state, { id: "acme.support.step" });
+    expect(state.enterpriseNodeDraft).toMatchObject({ id: "acme.support.step", error: null });
+    editEnterpriseNodeDraft(state, { title: "Step" });
+    expect(state.enterpriseNodeDraft?.title).toBe("Step");
+  });
+
+  it("cancel clears the draft", () => {
+    const { state } = createState();
+    beginAddEnterpriseNode(state, "acme.support.root");
+    cancelAddEnterpriseNode(state);
+    expect(state.enterpriseNodeDraft).toBeNull();
+  });
+
+  it("splices the child into a fresh export and loads it into the editor", async () => {
+    const { state, request } = createState();
+    state.enterpriseTreeDetail = treeDetail("acme.support");
+    request.mockResolvedValue({ content: supportExportContent() });
+    beginAddEnterpriseNode(state, "acme.support.root");
+    editEnterpriseNodeDraft(state, { id: "acme.support.resolve" });
+    editEnterpriseNodeDraft(state, { title: "Resolve" });
+
+    await submitAddEnterpriseNode(state);
+
+    // It re-exported the canonical definition as JSON, not the lossy flat detail.
+    expect(request).toHaveBeenCalledWith("enterprise.trees.export", {
+      treeId: "acme.support",
+      format: "json",
+    });
+    // The draft closed and the editor opened on the spliced definition.
+    expect(state.enterpriseNodeDraft).toBeNull();
+    expect(state.enterpriseTreeEditing).toBe(true);
+    expect(state.enterpriseTreeEditFormat).toBe("json");
+    const parsed = JSON.parse(state.enterpriseTreeEditContent);
+    expect(parsed.root.children).toEqual([{ id: "acme.support.resolve", title: "Resolve" }]);
+    // The operator has not saved yet — no import happened.
+    expect(request).not.toHaveBeenCalledWith("enterprise.trees.import", expect.anything());
+  });
+
+  it("rejects an invalid id in the form without re-exporting", async () => {
+    const { state, request } = createState();
+    state.enterpriseTreeDetail = treeDetail("acme.support");
+    beginAddEnterpriseNode(state, "acme.support.root");
+    editEnterpriseNodeDraft(state, { id: "Bad Id", title: "X" });
+
+    await submitAddEnterpriseNode(state);
+
+    expect(state.enterpriseNodeDraft?.error).toBe("id-pattern");
+    expect(state.enterpriseTreeEditing).toBe(false);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("rejects a duplicate id (already a node in the tree)", async () => {
+    const { state, request } = createState();
+    state.enterpriseTreeDetail = treeDetail("acme.support");
+    beginAddEnterpriseNode(state, "acme.support.root");
+    editEnterpriseNodeDraft(state, { id: "acme.support.root", title: "X" });
+
+    await submitAddEnterpriseNode(state);
+
+    expect(state.enterpriseNodeDraft?.error).toBe("id-duplicate");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("requires a title", async () => {
+    const { state, request } = createState();
+    state.enterpriseTreeDetail = treeDetail("acme.support");
+    beginAddEnterpriseNode(state, "acme.support.root");
+    editEnterpriseNodeDraft(state, { id: "acme.support.resolve", title: "   " });
+
+    await submitAddEnterpriseNode(state);
+
+    expect(state.enterpriseNodeDraft?.error).toBe("title-empty");
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it("surfaces an export failure in the form", async () => {
+    const { state, request } = createState();
+    state.enterpriseTreeDetail = treeDetail("acme.support");
+    request.mockResolvedValue({ content: null, reason: "unavailable" });
+    beginAddEnterpriseNode(state, "acme.support.root");
+    editEnterpriseNodeDraft(state, { id: "acme.support.resolve", title: "Resolve" });
+
+    await submitAddEnterpriseNode(state);
+
+    expect(state.enterpriseNodeDraft?.error).toBe("export-failed");
+    expect(state.enterpriseTreeEditing).toBe(false);
+  });
+
+  it("abandons a submit whose form was edited during the slow export", async () => {
+    const { state, request } = createState();
+    state.enterpriseTreeDetail = treeDetail("acme.support");
+    let resolveExport: ((value: unknown) => void) | undefined;
+    request.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveExport = resolve;
+        }),
+    );
+    beginAddEnterpriseNode(state, "acme.support.root");
+    editEnterpriseNodeDraft(state, { id: "acme.support.resolve" });
+    editEnterpriseNodeDraft(state, { title: "Resolve" });
+
+    const pending = submitAddEnterpriseNode(state);
+    // The operator keeps typing while the export is still in flight.
+    editEnterpriseNodeDraft(state, { title: "Renamed" });
+    resolveExport?.({ content: supportExportContent() });
+    await pending;
+
+    // The stale submit must not close the form or seed the editor with old values.
+    expect(state.enterpriseTreeEditing).toBe(false);
+    expect(state.enterpriseNodeDraft?.title).toBe("Renamed");
   });
 });

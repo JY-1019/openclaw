@@ -1,11 +1,23 @@
 {
-  "fallbackKeys": [],
-  "generatedAt": "2026-07-14T00:59:22.717Z",
+  "fallbackKeys": [
+    "enterprise.addNodeButton",
+    "enterprise.addNodeErrorExportFailed",
+    "enterprise.addNodeErrorIdDuplicate",
+    "enterprise.addNodeErrorIdEmpty",
+    "enterprise.addNodeErrorIdPattern",
+    "enterprise.addNodeErrorParentMissing",
+    "enterprise.addNodeErrorTitleEmpty",
+    "enterprise.addNodeIdLabel",
+    "enterprise.addNodeSubmit",
+    "enterprise.addNodeTitle",
+    "enterprise.addNodeTitleLabel"
+  ],
+  "generatedAt": "2026-07-15T11:28:16.100Z",
   "locale": "fr",
   "model": "claude-opus-4-6",
   "provider": "anthropic",
-  "sourceHash": "32a7f8562904be05c618fb7f7006bbafa0cc7fbd066803e84e5e4ad0782e578a",
-  "totalKeys": 1493,
-  "translatedKeys": 1493,
+  "sourceHash": "e6d29753fe9a7b237ee66e83b82d4a7105dda3d4486d25bf99897bb12a7ae792",
+  "totalKeys": 1508,
+  "translatedKeys": 1497,
   "workflow": 1
 }

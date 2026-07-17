@@ -9,7 +9,8 @@ import type { InboundEventKind } from "../channels/inbound-event/kind.js";
 import { selectApplicableRuntimeConfig } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { listEnterpriseKnowledgeFoundationIds } from "../enterprise/knowledge.js";
-import { getEnterpriseActiveRun } from "../enterprise/runtime.js";
+import { runDeclaresOntology } from "../enterprise/ontology-runtime.js";
+import { getEnterpriseActiveRun, runAllowsOntologyWrites } from "../enterprise/runtime.js";
 import { callGateway } from "../gateway/call.js";
 import { isEmbeddedMode } from "../infra/embedded-mode.js";
 import { getActiveSecretsRuntimeConfigSnapshot } from "../secrets/runtime-state.js";
@@ -59,6 +60,12 @@ import { createKnowledgeSearchTool } from "./tools/knowledge-search-tool.js";
 import { createMessageTool } from "./tools/message-tool.js";
 import { createMusicGenerateTool } from "./tools/music-generate-tool.js";
 import { createNodesTool } from "./tools/nodes-tool.js";
+import {
+  createComputeFunctionTool,
+  createGetNeighborsTool,
+  createInvokeActionTool,
+  createSearchObjectsTool,
+} from "./tools/ontology-tools.js";
 import { createPdfTool } from "./tools/pdf-tool.js";
 import { createSessionStatusTool } from "./tools/session-status-tool.js";
 import { createSessionsHistoryTool } from "./tools/sessions-history-tool.js";
@@ -201,6 +208,25 @@ export function createOpenClawTools(
     getEnterpriseActiveRun(options.runId) &&
     listEnterpriseKnowledgeFoundationIds().length > 0
       ? options.runId
+      : undefined;
+  // Expose the ontology tools only when the run's TREE actually declares an object
+  // graph. Enterprise mode is on by default and the stock built-in trees are
+  // deliberately guidance-free, so gating on run registration alone would add
+  // three useless tools to every stock run's tool list.
+  //
+  // The gate reads the PLAN, which is fixed for the run, so the tools stay in the
+  // list for the run's whole life: gating on the ACTIVE node's ontology would
+  // mutate the model-visible tool list as the run walks the tree and blow the
+  // prompt cache mid-run. Per-node scoping happens at execution instead.
+  const enterpriseOntologyRunId =
+    options?.runId && runDeclaresOntology(options.runId) ? options.runId : undefined;
+  // The WRITE tool needs an explicit opt-in on top of that. An omitted
+  // `allowedTools` means allow-all, so an existing tree that declares actions but
+  // scopes no tools would otherwise gain object-store writes on upgrade — from
+  // effects that until now were only validated and rendered.
+  const enterpriseOntologyWriteRunId =
+    enterpriseOntologyRunId && runAllowsOntologyWrites(enterpriseOntologyRunId)
+      ? enterpriseOntologyRunId
       : undefined;
   const runtimeSnapshot = getActiveSecretsRuntimeConfigSnapshot();
   const availabilityConfig = selectApplicableRuntimeConfig({
@@ -474,6 +500,18 @@ export function createOpenClawTools(
     ...(enterpriseKnowledgeRunId
       ? [createKnowledgeSearchTool({ runId: enterpriseKnowledgeRunId })]
       : []),
+    // Fixed position: tool ORDER is part of the prompt-cache key, so these are
+    // spliced at one stable point rather than appended wherever convenient.
+    ...(enterpriseOntologyRunId
+      ? [
+          createSearchObjectsTool({ runId: enterpriseOntologyRunId }),
+          createGetNeighborsTool({ runId: enterpriseOntologyRunId }),
+          createComputeFunctionTool({ runId: enterpriseOntologyRunId }),
+        ]
+      : []),
+    ...(enterpriseOntologyWriteRunId
+      ? [createInvokeActionTool({ runId: enterpriseOntologyWriteRunId })]
+      : []),
     createGetGoalTool({
       agentSessionKey: options?.agentSessionKey,
       runSessionKey: options?.runSessionKey,
@@ -607,6 +645,12 @@ export function createOpenClawTools(
   }
   const defaultHookContext: HookContext = {
     ...(hookAgentId ? { agentId: hookAgentId } : {}),
+    // The enterprise governance gate looks its run up by runId. Without it here, a
+    // caller that builds tools directly (createOpenClawTools({ runId })) got an
+    // unGOVERNED tool list — the gate returned undefined and every ontology
+    // decision, including a write denial or an approval, was skipped. Callers that
+    // supply their own hook context still win (it is spread over this).
+    ...(options?.runId ? { runId: options.runId } : {}),
     ...(resolvedConfig ? { config: resolvedConfig } : {}),
     ...(options?.agentSessionKey ? { sessionKey: options.agentSessionKey } : {}),
     ...(options?.sessionId ? { sessionId: options.sessionId } : {}),

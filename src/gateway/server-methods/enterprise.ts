@@ -18,9 +18,11 @@ import {
   type EnterpriseTreesRemoveResult,
   type EnterpriseTreeSummary,
   type EnterpriseTreeVersionSummary,
+  type EnterpriseObjectsListResult,
   ErrorCodes,
   errorShape,
   formatValidationErrors,
+  validateEnterpriseObjectsListParams,
   validateEnterpriseRunsGetParams,
   validateEnterpriseRunsListParams,
   validateEnterpriseTreesExportParams,
@@ -36,6 +38,10 @@ import {
 import { readConfigFileSnapshotForWrite } from "../../config/io.js";
 import { getRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import {
+  addressableObjectEntityIds,
+  searchOntologyObjects,
+} from "../../enterprise/object-store.sqlite.js";
 import { hashWorkflowTree } from "../../enterprise/plan.js";
 import { resolveEnterpriseMode } from "../../enterprise/runtime.js";
 import {
@@ -69,6 +75,9 @@ import type {
 import { resolveSessionStoreKey } from "../session-store-key.js";
 import { commitGatewayConfigWrite } from "./config-write-flow.js";
 import type { GatewayRequestHandlers } from "./types.js";
+
+/** Default page size for the object inspector when the caller omits `limit`. */
+const ENTERPRISE_OBJECTS_DEFAULT_LIMIT = 50;
 
 type PlanNodeRecord = EnterpriseRunRecord["plan"]["nodes"][number];
 
@@ -191,6 +200,16 @@ function mapTreeOntology(ontology: OntologyBinding | undefined): EnterpriseTreeO
       parameters: action.parameters ? structuredClone(action.parameters) : undefined,
       preconditions: action.preconditions ? [...action.preconditions] : undefined,
       effects: action.effects ? structuredClone(action.effects) : undefined,
+    }));
+  }
+  if (ontology.functions?.length) {
+    projected.functions = ontology.functions.map((fn) => ({
+      id: fn.id,
+      title: fn.title,
+      description: fn.description,
+      entity: fn.entity,
+      expression: fn.expression,
+      returns: fn.returns,
     }));
   }
   if (ontology.constraints?.length) {
@@ -328,6 +347,61 @@ export const enterpriseHandlers: GatewayRequestHandlers = {
     if (importError) {
       result.importError = importError.message;
     }
+    respond(true, result);
+  },
+  "enterprise.objects.list": ({ params, respond }) => {
+    if (!validateEnterpriseObjectsListParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid enterprise.objects.list params: ${formatValidationErrors(validateEnterpriseObjectsListParams.errors)}`,
+        ),
+      );
+      return;
+    }
+    // Fail closed on a non-authoritative definition: object rows persist in
+    // SQLite across imports, so a tree whose current definition failed to load
+    // (corrupt override -> importError, or an unreadable store) can still have
+    // seed/runtime rows from its last valid definition. Serving them would leak
+    // stale objects for a tree the registry no longer trusts, so gate on the same
+    // authority check enterprise.trees.get surfaces, and return no rows otherwise.
+    const snapshot = getWorkflowTreeRegistrySnapshot();
+    const entry = snapshot.entries.find((candidate) => candidate.tree.id === params.treeId);
+    const hasImportError = snapshot.importErrors.some((issue) => issue.treeId === params.treeId);
+    const authoritative = !hasImportError && snapshot.storeError === undefined;
+    if (!entry || !authoritative) {
+      respond(true, { objects: [] } satisfies EnterpriseObjectsListResult);
+      return;
+    }
+    // Only the tree's currently-declared, addressable object types may be read.
+    // A re-import that drops an entity (or its primaryKey) leaves that entity's
+    // runtime rows in SQLite, so without this a caller could still read objects
+    // for a type the authoritative definition no longer declares.
+    if (!addressableObjectEntityIds(entry.tree).has(params.entity)) {
+      respond(true, { objects: [] } satisfies EnterpriseObjectsListResult);
+      return;
+    }
+    // Instances are stored tree-wide by object type; this is an operator read
+    // (operator.read), so it surfaces every property — unlike the model tools,
+    // which scope properties to the active node. `properties` is omitted here so
+    // the inspector shows the full object, and searchOntologyObjects reads only
+    // the requested tree/entity, never another tree's data.
+    const objects = searchOntologyObjects({
+      treeId: params.treeId,
+      entity: params.entity,
+      ...(params.match ? { match: params.match } : {}),
+      limit: params.limit ?? ENTERPRISE_OBJECTS_DEFAULT_LIMIT,
+    });
+    const result: EnterpriseObjectsListResult = {
+      objects: objects.map((object) => ({
+        objectId: object.objectId,
+        properties: object.properties,
+        provenance: object.provenance,
+        updatedAt: object.updatedAt,
+      })),
+    };
     respond(true, result);
   },
   "enterprise.trees.import": ({ params, respond }) => {

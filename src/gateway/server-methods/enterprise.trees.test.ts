@@ -56,7 +56,10 @@ const RICH_TREE = JSON.stringify({
     id: "root",
     title: "Root",
     ontology: {
-      entities: [{ id: "a", description: "Entity A" }, { id: "b" }],
+      entities: [
+        { id: "a", description: "Entity A", properties: [{ id: "score", type: "number" }] },
+        { id: "b" },
+      ],
       relationships: [{ id: "a-b", from: "a", to: "b", description: "A relates to B" }],
       allowedTools: ["memory_search"],
     },
@@ -67,6 +70,7 @@ const RICH_TREE = JSON.stringify({
         description: "A leaf step",
         ontology: {
           actions: [{ id: "act", description: "Do a thing", tools: ["exec"] }],
+          functions: [{ id: "hot", entity: "a", expression: "$score >= 75", returns: "boolean" }],
           constraints: [{ id: "c1", description: "Be careful" }],
           deniedTools: ["process"],
           audit: true,
@@ -112,7 +116,7 @@ describe("enterprise.trees.get", () => {
     expect(nodes.every((node) => node.depth === (node.parentId === null ? 0 : 1))).toBe(true);
   });
 
-  it("projects the full ontology (entities, relationships, actions, constraints, scopes)", () => {
+  it("projects the full ontology (entities, relationships, actions, functions, constraints, scopes)", () => {
     const { payload } = invoke({ treeId: "test.ontology" });
     const { tree } = payload as { tree: Record<string, unknown> };
     expect(tree).toMatchObject({ source: "imported", version: "2.0.0" });
@@ -121,7 +125,11 @@ describe("enterprise.trees.get", () => {
     const root = nodes.find((node) => node.id === "root");
     expect(root?.ontology).toEqual({
       entities: [
-        { id: "a", description: "Entity A" },
+        {
+          id: "a",
+          description: "Entity A",
+          properties: [{ id: "score", type: "number" }],
+        },
         { id: "b", description: undefined },
       ],
       relationships: [{ id: "a-b", from: "a", to: "b", description: "A relates to B" }],
@@ -129,8 +137,21 @@ describe("enterprise.trees.get", () => {
     });
     const child = nodes.find((node) => node.id === "root.child");
     expect(child).toMatchObject({ parentId: "root", depth: 1, description: "A leaf step" });
+    // Functions must survive the projection: a node's ontology that validates on
+    // import but arrives at the API missing a field makes an imported tree look
+    // like it silently lost half of what the operator authored.
     expect(child?.ontology).toEqual({
       actions: [{ id: "act", description: "Do a thing", tools: ["exec"] }],
+      functions: [
+        {
+          id: "hot",
+          title: undefined,
+          description: undefined,
+          entity: "a",
+          expression: "$score >= 75",
+          returns: "boolean",
+        },
+      ],
       constraints: [{ id: "c1", description: "Be careful" }],
       deniedTools: ["process"],
       audit: true,

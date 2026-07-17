@@ -17,10 +17,18 @@ import {
   applyEnterpriseMediation,
   finishEnterpriseMediation,
   resolveRouteModelRefForTest,
+  type EnterpriseMediatedRunParams,
 } from "./enterprise-mediation.js";
 
+// The helper feeds BOTH entrypoints, and they take different param surfaces:
+// applyEnterpriseMediation takes the runner's params, resolveRouteModelRef takes
+// the mediation surface (which is where externalDispatch/authProfileId live).
+// Typing it as only the former silently dropped the dispatch fields the
+// model-leak guard is built on.
+type MediationTestParams = RunEmbeddedAgentParams & EnterpriseMediatedRunParams;
+
 let runCounter = 0;
-function makeParams(overrides: Partial<RunEmbeddedAgentParams> = {}): RunEmbeddedAgentParams {
+function makeParams(overrides: Partial<MediationTestParams> = {}): MediationTestParams {
   runCounter += 1;
   return {
     sessionId: `session-${runCounter}`,

@@ -1,12 +1,20 @@
+import { z } from "zod";
 /**
  * Zod schemas and validation for ClawWorks enterprise definitions.
  * Import/export artifacts (workflow trees) validate against the versioned
  * envelope here; config-declared governance policies share the same shapes.
  */
-import { z } from "zod";
+import {
+  expressionTypeOf,
+  inferOntologyExpressionType,
+  ontologyExpressionProperties,
+  ontologyValueMatchesType,
+  parseOntologyExpression,
+} from "./ontology-expression.js";
 import {
   WORKFLOW_TREE_SCHEMA,
   WORKFLOW_TREE_SCHEMA_VERSION,
+  type OntologyValueType,
   type WorkflowTreeDefinition,
 } from "./types.js";
 
@@ -125,6 +133,43 @@ const OntologyActionSchema = z
   })
   .strict();
 
+const OntologyFunctionSchema = z
+  .object({
+    id: EnterpriseIdSchema,
+    title: z.string().min(1).optional(),
+    description: z.string().optional(),
+    entity: EnterpriseIdSchema,
+    expression: NonBlankStringSchema,
+    returns: OntologyValueTypeSchema,
+  })
+  .strict()
+  .superRefine((fn, ctx) => {
+    // Parse at import, not at first use: a syntax error must fail the import with
+    // a path, not surface mid-run as a computed value that quietly went missing.
+    const parsed = parseOntologyExpression(fn.expression);
+    if (!parsed.ok) {
+      ctx.addIssue({ code: "custom", path: ["expression"], message: parsed.error });
+    }
+  });
+
+/** A property value: the four shapes an OntologyValue can take. */
+const OntologyValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+const OntologyObjectSeedSchema = z
+  .object({
+    entity: EnterpriseIdSchema,
+    properties: z.record(EnterpriseIdSchema, OntologyValueSchema),
+  })
+  .strict();
+
+const OntologyLinkSeedSchema = z
+  .object({
+    relationship: EnterpriseIdSchema,
+    from: NonBlankStringSchema,
+    to: NonBlankStringSchema,
+  })
+  .strict();
+
 const OntologyConstraintSchema = z
   .object({
     id: EnterpriseIdSchema,
@@ -137,6 +182,9 @@ export const OntologyBindingSchema = z
     entities: z.array(OntologyEntitySchema).optional(),
     relationships: z.array(OntologyRelationshipSchema).optional(),
     actions: z.array(OntologyActionSchema).optional(),
+    functions: z.array(OntologyFunctionSchema).optional(),
+    objects: z.array(OntologyObjectSeedSchema).optional(),
+    links: z.array(OntologyLinkSeedSchema).optional(),
     constraints: z.array(OntologyConstraintSchema).optional(),
     allowedTools: z.array(NonBlankStringSchema).optional(),
     deniedTools: z.array(NonBlankStringSchema).optional(),
@@ -211,10 +259,26 @@ export const WorkflowTreeDefinitionSchema = z
     /** Merged shape of each tree-scoped object type, to catch conflicting redeclarations. */
     const entityShapes = new Map<
       string,
-      { primaryKey?: string; propertyTypes: Map<string, string> }
+      {
+        primaryKey?: string;
+        propertyTypes: Map<string, OntologyValueType>;
+        /** Properties declared `required`: a seeded object must carry them. */
+        required: Set<string>;
+      }
     >();
     /** Merged shape of each tree-scoped link type, keyed by "from to id". */
     const relationshipShapes = new Map<string, { cardinality?: string; inverse?: string }>();
+    /** Endpoints of each link TYPE, so a seeded link can be checked against them. */
+    const relationshipEndpoints = new Map<string, { from: string; to: string }>();
+    /** Link ids declared with more than one endpoint pair: unusable as a seed target. */
+    const ambiguousRelationshipIds = new Set<string>();
+    /** Declared cardinality per link type, so seeded edges can be held to it. */
+    const relationshipCardinality = new Map<string, string>();
+    /** Every seeded link, collected tree-wide before cardinality is checked. */
+    const seededLinks: Array<{
+      link: { relationship: string; from: string; to: string };
+      path: (string | number)[];
+    }> = [];
     const nodes: { node: WorkflowNodeShape; path: (string | number)[] }[] = [];
 
     const visit = (node: WorkflowNodeShape, path: (string | number)[]) => {
@@ -235,7 +299,10 @@ export const WorkflowTreeDefinitionSchema = z
         // within one — otherwise a child could redeclare `customer` with a
         // different primaryKey and the merge would pick one arbitrarily.
         const entityPath = [...path, "ontology", "entities", entityIndex];
-        const shape = entityShapes.get(entity.id) ?? { propertyTypes: new Map<string, string>() };
+        const shape = entityShapes.get(entity.id) ?? {
+          propertyTypes: new Map<string, OntologyValueType>(),
+          required: new Set<string>(),
+        };
         for (const property of entity.properties ?? []) {
           const knownType = shape.propertyTypes.get(property.id);
           if (knownType && knownType !== property.type) {
@@ -246,6 +313,9 @@ export const WorkflowTreeDefinitionSchema = z
             });
           }
           shape.propertyTypes.set(property.id, property.type);
+          if (property.required) {
+            shape.required.add(property.id);
+          }
           if (property.primaryKey) {
             if (shape.primaryKey && shape.primaryKey !== property.id) {
               ctx.addIssue({
@@ -264,6 +334,26 @@ export const WorkflowTreeDefinitionSchema = z
       // with a different cardinality or inverse would be silently ignored and
       // the UI would show metadata that contradicts the definition.
       node.ontology?.relationships?.forEach((relationship, relationshipIndex) => {
+        // The graph dedupes link TYPES by [from, to, id], so one id may legally
+        // name two different endpoint pairs. A seeded link names only the id, so
+        // such an id is AMBIGUOUS as a seed target — record the ambiguity here and
+        // reject the seed below rather than silently picking the first pair and
+        // materializing the edge between the wrong object types.
+        if (relationship.cardinality) {
+          relationshipCardinality.set(relationship.id, relationship.cardinality);
+        }
+        const knownEndpoints = relationshipEndpoints.get(relationship.id);
+        if (!knownEndpoints) {
+          relationshipEndpoints.set(relationship.id, {
+            from: relationship.from,
+            to: relationship.to,
+          });
+        } else if (
+          knownEndpoints.from !== relationship.from ||
+          knownEndpoints.to !== relationship.to
+        ) {
+          ambiguousRelationshipIds.add(relationship.id);
+        }
         // Same key the graph dedupes on, so validation and rendering agree.
         const key = JSON.stringify([relationship.from, relationship.to, relationship.id]);
         const known = relationshipShapes.get(key);
@@ -308,6 +398,245 @@ export const WorkflowTreeDefinitionSchema = z
           }
         });
       });
+      // A function's expression is checked against the MERGED tree-wide shape of
+      // its object type, so a deep step may compute over a property its ancestor
+      // declared. Resolving refs here (not at call time) is the whole point: an
+      // unresolvable `$property` is a definition bug, and finding it at import
+      // beats returning a null from compute_function in the middle of a run.
+      node.ontology?.functions?.forEach((fn, index) => {
+        const functionPath = [...path, "ontology", "functions", index];
+        const shape = entityShapes.get(fn.entity);
+        if (!shape) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...functionPath, "entity"],
+            message: `function "${fn.id}" computes over undeclared object type "${fn.entity}"`,
+          });
+          return;
+        }
+        const parsed = parseOntologyExpression(fn.expression);
+        if (!parsed.ok) {
+          // The field-level refine already reported the syntax error.
+          return;
+        }
+        let refsResolve = true;
+        for (const property of ontologyExpressionProperties(parsed.expression)) {
+          if (!shape.propertyTypes.has(property)) {
+            refsResolve = false;
+            ctx.addIssue({
+              code: "custom",
+              path: [...functionPath, "expression"],
+              message: `function "${fn.id}" reads "$${property}", which object type "${fn.entity}" does not declare`,
+            });
+          }
+        }
+        if (!refsResolve) {
+          // Type-checking an expression with a dangling ref would only restate
+          // the error above in a more confusing way.
+          return;
+        }
+        // Type-check against the declared property types, then against `returns`.
+        // Skipping this would leave `returns` a label nobody enforces: a boolean
+        // expression could claim `returns: string`, and the gateway would project
+        // that lie to every client until something finally evaluated it.
+        const inferred = inferOntologyExpressionType(parsed.expression, shape.propertyTypes);
+        if (!inferred.ok) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...functionPath, "expression"],
+            message: `function "${fn.id}": ${inferred.error}`,
+          });
+          return;
+        }
+        const declared = expressionTypeOf(fn.returns);
+        if (inferred.type !== declared) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...functionPath, "returns"],
+            message: `function "${fn.id}" declares returns "${fn.returns}" (${declared}), but its expression yields ${inferred.type}`,
+          });
+        }
+      });
+    }
+
+    // Seeded objects are typed data, so they are checked against the object type
+    // they claim to be: an untyped blob that only fails when a tool reads it
+    // would make the ontology's property types decorative again. Collected
+    // tree-wide first, because a link declared on one node may join objects
+    // seeded on another.
+    const seededObjects = new Map<string, Set<string>>();
+    for (const { node, path } of nodes) {
+      node.ontology?.objects?.forEach((seed, index) => {
+        const seedPath = [...path, "ontology", "objects", index];
+        const shape = entityShapes.get(seed.entity);
+        if (!shape) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...seedPath, "entity"],
+            message: `seeded object references undeclared object type "${seed.entity}"`,
+          });
+          return;
+        }
+        if (!shape.primaryKey) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...seedPath, "entity"],
+            message: `object type "${seed.entity}" declares no primaryKey, so its instances have no identity to seed`,
+          });
+          return;
+        }
+        for (const [property, value] of Object.entries(seed.properties)) {
+          const type = shape.propertyTypes.get(property);
+          if (!type) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...seedPath, "properties", property],
+              message: `object type "${seed.entity}" does not declare property "${property}"`,
+            });
+            continue;
+          }
+          if (!ontologyValueMatchesType(value, type)) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...seedPath, "properties", property],
+              message: `property "${property}" is declared "${type}" but the seeded value is ${value === null ? "null" : typeof value}`,
+            });
+          }
+        }
+        // A `required` property that a seed omits (or nulls) is an instance that
+        // violates its own object type: search_objects would hand the model an
+        // object the ontology says cannot exist, and a function reading that field
+        // would see null. Checked here, at import, not at read time.
+        for (const property of shape.required) {
+          const value = seed.properties[property];
+          if (value === undefined || value === null) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...seedPath, "properties"],
+              message: `object type "${seed.entity}" declares "${property}" required, but the seeded object does not set it`,
+            });
+          }
+        }
+        const identity = seed.properties[shape.primaryKey];
+        // A blank identity is no identity: links require non-blank endpoints and
+        // the tools reject a blank objectId, so an object seeded with "" would be
+        // visible in search_objects but impossible to address or traverse.
+        const hasIdentity =
+          typeof identity === "number" ||
+          (typeof identity === "string" && identity.trim().length > 0);
+        if (!hasIdentity) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...seedPath, "properties"],
+            message: `seeded object must carry a non-blank primaryKey "${shape.primaryKey}"`,
+          });
+          return;
+        }
+        // Padded ids are unaddressable: the tools read objectId with the standard
+        // trimming param reader, so an object stored as " C-1 " comes back from
+        // search_objects with an id that get_neighbors can no longer look up.
+        if (typeof identity === "string" && identity !== identity.trim()) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...seedPath, "properties", shape.primaryKey],
+            message: `primaryKey "${shape.primaryKey}" must not have leading or trailing whitespace: the tools would trim it and lose the object`,
+          });
+          return;
+        }
+        const objectId = String(identity);
+        const seenForEntity = seededObjects.get(seed.entity) ?? new Set<string>();
+        if (seenForEntity.has(objectId)) {
+          // Two seeds with one identity would collide on the store's primary key
+          // and silently last-write-wins at import.
+          ctx.addIssue({
+            code: "custom",
+            path: [...seedPath, "properties", shape.primaryKey],
+            message: `duplicate "${seed.entity}" object "${objectId}"`,
+          });
+        }
+        seenForEntity.add(objectId);
+        seededObjects.set(seed.entity, seenForEntity);
+      });
+    }
+
+    for (const { node, path } of nodes) {
+      node.ontology?.links?.forEach((link, index) => {
+        const linkPath = [...path, "ontology", "links", index];
+        const endpoints = relationshipEndpoints.get(link.relationship);
+        if (!endpoints) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...linkPath, "relationship"],
+            message: `seeded link references undeclared link type "${link.relationship}"`,
+          });
+          return;
+        }
+        if (ambiguousRelationshipIds.has(link.relationship)) {
+          // Two link types share this id with different endpoints, so the seed
+          // does not say which one it means. Materializing the first would connect
+          // the wrong object types whenever the object ids happen to overlap.
+          ctx.addIssue({
+            code: "custom",
+            path: [...linkPath, "relationship"],
+            message: `link type "${link.relationship}" is declared with more than one endpoint pair, so a seeded link cannot say which one it means`,
+          });
+          return;
+        }
+        // A link whose endpoints do not exist is a dangling edge that
+        // get_neighbors would traverse into nothing.
+        for (const [side, objectId, entity] of [
+          ["from", link.from, endpoints.from],
+          ["to", link.to, endpoints.to],
+        ] as const) {
+          if (!seededObjects.get(entity)?.has(objectId)) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...linkPath, side],
+              message: `link "${link.relationship}" ${side} "${objectId}" is not a seeded "${entity}" object`,
+            });
+          }
+        }
+        seededLinks.push({ link, path: linkPath });
+      });
+    }
+
+    // Cardinality is a CONTRACT, not a label. A one-to-many link that seeds two
+    // owners for the same target would make get_neighbors return a graph that
+    // contradicts the ontology the model was handed — the exact class of
+    // decorative-declaration bug this whole surface exists to remove.
+    //
+    // "one" on a side means an object may appear on that side at most once:
+    //   one-to-one   both sides unique
+    //   one-to-many  each TO belongs to a single FROM
+    //   many-to-one  each FROM points at a single TO
+    //   many-to-many unconstrained
+    const linkSideSeen = new Map<string, Set<string>>();
+    for (const { link, path } of seededLinks) {
+      const cardinality = relationshipCardinality.get(link.relationship);
+      if (!cardinality || cardinality === "many-to-many") {
+        continue;
+      }
+      const sides = [
+        ...(cardinality === "one-to-one" || cardinality === "many-to-one"
+          ? ([["from", link.from]] as const)
+          : []),
+        ...(cardinality === "one-to-one" || cardinality === "one-to-many"
+          ? ([["to", link.to]] as const)
+          : []),
+      ];
+      for (const [side, objectId] of sides) {
+        const key = `${link.relationship}::${side}`;
+        const seenIds = linkSideSeen.get(key) ?? new Set<string>();
+        if (seenIds.has(objectId)) {
+          ctx.addIssue({
+            code: "custom",
+            path: [...path, side],
+            message: `link "${link.relationship}" is ${cardinality}, so "${objectId}" may appear on its ${side} side only once`,
+          });
+        }
+        seenIds.add(objectId);
+        linkSideSeen.set(key, seenIds);
+      }
     }
   });
 

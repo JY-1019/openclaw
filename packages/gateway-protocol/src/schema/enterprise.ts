@@ -156,6 +156,19 @@ export const EnterpriseOntologyActionSchema = Type.Object(
   { additionalProperties: false },
 );
 
+/** A derived value computed from one object type's own properties. */
+export const EnterpriseOntologyFunctionSchema = Type.Object(
+  {
+    id: NonEmptyString,
+    title: Type.Optional(Type.String()),
+    description: Type.Optional(Type.String()),
+    entity: NonEmptyString,
+    expression: NonEmptyString,
+    returns: EnterpriseOntologyValueTypeSchema,
+  },
+  { additionalProperties: false },
+);
+
 /** A constraint the step must respect (prompt guidance). */
 export const EnterpriseOntologyConstraintSchema = Type.Object(
   { id: NonEmptyString, description: Type.String() },
@@ -168,6 +181,7 @@ export const EnterpriseTreeOntologySchema = Type.Object(
     entities: Type.Optional(Type.Array(EnterpriseOntologyEntitySchema)),
     relationships: Type.Optional(Type.Array(EnterpriseOntologyRelationshipSchema)),
     actions: Type.Optional(Type.Array(EnterpriseOntologyActionSchema)),
+    functions: Type.Optional(Type.Array(EnterpriseOntologyFunctionSchema)),
     constraints: Type.Optional(Type.Array(EnterpriseOntologyConstraintSchema)),
     allowedTools: Type.Optional(Type.Array(Type.String())),
     deniedTools: Type.Optional(Type.Array(Type.String())),
@@ -237,6 +251,43 @@ export const EnterpriseTreesGetResultSchema = Type.Object(
     importError: Type.Optional(Type.String()),
     storeError: Type.Optional(Type.String()),
   },
+  { additionalProperties: false },
+);
+
+/** A concrete ontology property VALUE (an object instance carries these). */
+export const EnterpriseOntologyValueSchema = Type.Union([
+  Type.String(),
+  Type.Number(),
+  Type.Boolean(),
+  Type.Null(),
+]);
+
+/** One ontology object INSTANCE, as the operator inspector renders it. */
+export const EnterpriseOntologyObjectSchema = Type.Object(
+  {
+    objectId: NonEmptyString,
+    properties: Type.Record(Type.String(), EnterpriseOntologyValueSchema),
+    /** Whether the tree declared this object (`seed`) or an action created it (`runtime`). */
+    provenance: Type.Union([Type.Literal("seed"), Type.Literal("runtime")]),
+    updatedAt: TimestampSchema,
+  },
+  { additionalProperties: false },
+);
+
+/** Instances of one object type in one tree, for the node inspector. */
+export const EnterpriseObjectsListParamsSchema = Type.Object(
+  {
+    treeId: NonEmptyString,
+    entity: NonEmptyString,
+    /** Case-insensitive substring over property values. */
+    match: Type.Optional(Type.String()),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200 })),
+  },
+  { additionalProperties: false },
+);
+
+export const EnterpriseObjectsListResultSchema = Type.Object(
+  { objects: Type.Array(EnterpriseOntologyObjectSchema) },
   { additionalProperties: false },
 );
 
@@ -420,6 +471,7 @@ export const EnterpriseRunEventKindSchema = Type.Union([
   Type.Literal("governance.decision"),
   Type.Literal("node.entered"),
   Type.Literal("node.completed"),
+  Type.Literal("action.invoked"),
 ]);
 
 /** One trace event in an execution timeline. */

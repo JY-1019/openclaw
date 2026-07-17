@@ -6827,6 +6827,7 @@ public struct EnterpriseTreeOntology: Codable, Sendable {
     public let entities: [[String: AnyCodable]]?
     public let relationships: [[String: AnyCodable]]?
     public let actions: [[String: AnyCodable]]?
+    public let functions: [[String: AnyCodable]]?
     public let constraints: [[String: AnyCodable]]?
     public let allowedtools: [String]?
     public let deniedtools: [String]?
@@ -6839,6 +6840,7 @@ public struct EnterpriseTreeOntology: Codable, Sendable {
         entities: [[String: AnyCodable]]?,
         relationships: [[String: AnyCodable]]?,
         actions: [[String: AnyCodable]]?,
+        functions: [[String: AnyCodable]]?,
         constraints: [[String: AnyCodable]]?,
         allowedtools: [String]?,
         deniedtools: [String]?,
@@ -6850,6 +6852,7 @@ public struct EnterpriseTreeOntology: Codable, Sendable {
         self.entities = entities
         self.relationships = relationships
         self.actions = actions
+        self.functions = functions
         self.constraints = constraints
         self.allowedtools = allowedtools
         self.deniedtools = deniedtools
@@ -6863,6 +6866,7 @@ public struct EnterpriseTreeOntology: Codable, Sendable {
         case entities
         case relationships
         case actions
+        case functions
         case constraints
         case allowedtools = "allowedTools"
         case deniedtools = "deniedTools"
@@ -6982,6 +6986,72 @@ public struct EnterpriseTreesGetResult: Codable, Sendable {
         case tree
         case importerror = "importError"
         case storeerror = "storeError"
+    }
+}
+
+public struct EnterpriseOntologyObject: Codable, Sendable {
+    public let objectid: String
+    public let properties: [String: AnyCodable]
+    public let provenance: AnyCodable
+    public let updatedat: Int
+
+    public init(
+        objectid: String,
+        properties: [String: AnyCodable],
+        provenance: AnyCodable,
+        updatedat: Int)
+    {
+        self.objectid = objectid
+        self.properties = properties
+        self.provenance = provenance
+        self.updatedat = updatedat
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case objectid = "objectId"
+        case properties
+        case provenance
+        case updatedat = "updatedAt"
+    }
+}
+
+public struct EnterpriseObjectsListParams: Codable, Sendable {
+    public let treeid: String
+    public let entity: String
+    public let match: String?
+    public let limit: Int?
+
+    public init(
+        treeid: String,
+        entity: String,
+        match: String?,
+        limit: Int?)
+    {
+        self.treeid = treeid
+        self.entity = entity
+        self.match = match
+        self.limit = limit
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case treeid = "treeId"
+        case entity
+        case match
+        case limit
+    }
+}
+
+public struct EnterpriseObjectsListResult: Codable, Sendable {
+    public let objects: [EnterpriseOntologyObject]
+
+    public init(
+        objects: [EnterpriseOntologyObject])
+    {
+        self.objects = objects
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case objects
     }
 }
 

@@ -18,6 +18,11 @@ import {
   type OpenClawStateDatabaseOptions,
 } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
+import {
+  collectOntologySeed,
+  deleteOntologyObjectsForTree,
+  replaceSeededOntologyObjects,
+} from "./object-store.sqlite.js";
 import { validateWorkflowTreeDefinition } from "./schema.js";
 import type { WorkflowTreeDefinition } from "./types.js";
 
@@ -269,6 +274,14 @@ export function upsertEnterpriseWorkflowTree(
         saved_at: now,
       }),
     );
+    // Materialize the objects the tree declares in the SAME transaction: the
+    // definition and its instances must never be half-applied, or a run would
+    // plan against a tree whose objects do not exist yet.
+    replaceSeededOntologyObjects(database, {
+      treeId: params.tree.id,
+      seed: collectOntologySeed(params.tree),
+      now,
+    });
   }, stateDatabaseOptions(options));
 }
 
@@ -420,6 +433,12 @@ export function deleteEnterpriseWorkflowTree(
       stateDb.deleteFrom("enterprise_workflow_trees").where("tree_id", "=", treeId),
     );
     removed = (normalizeSqliteNumber(result.numAffectedRows ?? 0n) ?? 0) > 0;
+    if (removed) {
+      // There is no FK to cascade from (built-in trees are code, not rows), so
+      // this has to be explicit: otherwise the removed tree's objects survive and
+      // are inherited by whatever tree next claims the id.
+      deleteOntologyObjectsForTree(database, treeId);
+    }
   }, stateDatabaseOptions(options));
   return removed;
 }

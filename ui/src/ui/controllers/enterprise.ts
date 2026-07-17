@@ -1,5 +1,7 @@
 // Control UI controller manages the enterprise inspection gateway state.
 import type {
+  EnterpriseObjectsListResult,
+  EnterpriseOntologyObject,
   EnterpriseRunDetail,
   EnterpriseRunsGetResult,
   EnterpriseRunsListResult,
@@ -17,6 +19,12 @@ import type {
   EnterpriseTreeVersionSummary,
 } from "../../../../packages/gateway-protocol/src/index.js";
 import type { GatewayBrowserClient } from "../gateway.ts";
+import { nodeObjectEntityIds } from "../views/enterprise-ontology-graph.ts";
+import {
+  type EditableTreeDefinition,
+  insertChildNode,
+  newNodeIdIssue,
+} from "../views/enterprise-tree-edit.ts";
 import {
   formatMissingOperatorReadScopeMessage,
   isMissingOperatorReadScopeError,
@@ -26,6 +34,30 @@ import {
 export type EnterpriseTreeConfirm = { kind: "save" } | { kind: "remove"; treeId: string };
 
 export type EnterpriseTreeEditFormat = "yaml" | "json";
+
+/** Why a node-add draft was rejected; the view maps each to an i18n message. */
+export type EnterpriseNodeDraftError =
+  | "id-empty"
+  | "id-pattern"
+  | "id-duplicate"
+  | "title-empty"
+  | "parent-missing"
+  | "export-failed";
+
+/**
+ * An in-progress "add child node" form. Bound to `treeId` so a draft can never be
+ * applied to a different tree that happens to share the parent node id (e.g. a
+ * root named `root`); `parentId` is the node the child is added under. null when
+ * no form is open. On submit the tree is re-exported, spliced, and loaded into the
+ * raw editor for review + Save, so node creation reuses enterprise.trees.import.
+ */
+export type EnterpriseNodeDraft = {
+  treeId: string;
+  parentId: string;
+  id: string;
+  title: string;
+  error: EnterpriseNodeDraftError | null;
+};
 
 export type EnterpriseState = {
   client: GatewayBrowserClient | null;
@@ -49,6 +81,12 @@ export type EnterpriseState = {
   enterpriseTreeDetail: EnterpriseTreeDetail | null;
   enterpriseTreeLoading: boolean;
   enterpriseTreeIssue: string | null;
+  // P4 node inspector: the expanded workflow node, which entity type's instances
+  // are shown for it, and those rows. Cleared on tree switch/reload.
+  enterpriseSelectedNodeId: string | null;
+  enterpriseNodeObjectsEntity: string | null;
+  enterpriseNodeObjects: EnterpriseOntologyObject[];
+  enterpriseNodeObjectsLoading: boolean;
   enterpriseTreeEditing: boolean;
   // The id being edited, or null for a brand-new tree — distinguishes create
   // from edit so format switches reseed from the right source.
@@ -64,6 +102,9 @@ export type EnterpriseState = {
   enterpriseTreeConfirm: EnterpriseTreeConfirm | null;
   enterpriseTreeVersions: EnterpriseTreeVersionSummary[];
   enterpriseTreeVersionsLoading: boolean;
+  // P5 dynamic node creation: the open "add child node" form, or null. Splices a
+  // child into the tree definition and reuses the editor's import-to-save flow.
+  enterpriseNodeDraft: EnterpriseNodeDraft | null;
   enterpriseError: string | null;
 };
 
@@ -203,6 +244,10 @@ export async function loadEnterpriseTreeDetail(state: EnterpriseState, treeId: s
   if (!state.client || !state.connected) {
     return;
   }
+  // A save that imports a NEW tree opens it through this same path, so a node id
+  // shared with the prior tree (e.g. "root") must not carry that selection across.
+  const previousTreeId = state.enterpriseSelectedTreeId;
+  const treeChanged = previousTreeId !== treeId;
   const requestSeq = ++treeRequestSeq;
   state.enterpriseSelectedTreeId = treeId;
   state.enterpriseTreeDetail = null;
@@ -211,6 +256,14 @@ export async function loadEnterpriseTreeDetail(state: EnterpriseState, treeId: s
   // Clear any prior banner (e.g. a transient runs.get failure); a successful
   // tree load must not render beneath a stale global error.
   state.enterpriseError = null;
+  // Drop the prior node selection eagerly on a tree switch — before the async
+  // load can fail or be superseded. Clearing only on success would leave the old
+  // selection dangling under the just-assigned tree id, where a later retry
+  // (now previousTreeId === treeId) would mistake a shared node id for a
+  // same-tree refresh and auto-load the wrong tree's rows.
+  if (treeChanged) {
+    clearEnterpriseNodeSelection(state);
+  }
   try {
     const res = await state.client.request<EnterpriseTreesGetResult>("enterprise.trees.get", {
       treeId,
@@ -221,6 +274,17 @@ export async function loadEnterpriseTreeDetail(state: EnterpriseState, treeId: s
     state.enterpriseTreeDetail = res.tree;
     // A stale built-in may be returned; surface the failed override/store read.
     state.enterpriseTreeIssue = res.storeError ?? res.importError ?? null;
+    // Reconcile only a same-tree refresh that returned an authoritative tree.
+    // A fallback (storeError/importError) or a missing tree means the ontology on
+    // screen may not match the selection, so drop it rather than load rows.
+    const authoritative = !res.storeError && !res.importError;
+    if (!treeChanged && authoritative && res.tree) {
+      // Same-tree reload (Refresh / re-save): keep the node selection but re-point
+      // its instance rows at the freshly loaded ontology so they cannot go stale.
+      reconcileNodeSelectionAfterReload(state, res.tree);
+    } else {
+      clearEnterpriseNodeSelection(state);
+    }
   } catch (err) {
     if (requestSeq !== treeRequestSeq) {
       return;
@@ -264,8 +328,130 @@ function resetTreeEditing(state: EnterpriseState) {
 export function selectEnterpriseTree(state: EnterpriseState, treeId: string) {
   // Switching trees abandons an unsaved edit of the previous one.
   resetTreeEditing(state);
+  // A node selection belongs to the tree it was made in; a different tree's node
+  // panel would be nonsense against the new tree's ontology.
+  clearEnterpriseNodeSelection(state);
   void loadEnterpriseTreeDetail(state, treeId);
   void loadEnterpriseTreeVersions(state, treeId);
+}
+
+// Separate token so a node's object load races independently from tree/detail
+// loads: a fast node click while a detail refresh is in flight must not drop.
+let nodeObjectsRequestSeq = 0;
+
+// Drop the loaded instance rows and invalidate any in-flight objects request,
+// without touching which node is selected. Bumping the token here is what makes
+// a late reply from a superseded entity/tree load fall through its own guard.
+function clearEnterpriseNodeObjects(state: EnterpriseState) {
+  nodeObjectsRequestSeq++;
+  state.enterpriseNodeObjectsEntity = null;
+  state.enterpriseNodeObjects = [];
+  state.enterpriseNodeObjectsLoading = false;
+}
+
+function clearEnterpriseNodeSelection(state: EnterpriseState) {
+  clearEnterpriseNodeObjects(state);
+  state.enterpriseSelectedNodeId = null;
+  // A node-add draft belongs to the selected node in its tree; a tree switch,
+  // pruned node, or scope loss (every caller of this) invalidates it, so drop it
+  // rather than let a stale form reappear under a same-named node elsewhere.
+  state.enterpriseNodeDraft = null;
+}
+
+/**
+ * Refresh and post-save re-import reload the *same* tree in place, so a node's
+ * cached instances belong to the pre-reload ontology. Reconcile against the
+ * freshly loaded tree: drop the selection if the node vanished, otherwise reload
+ * rows for the still-valid entity — keeping the operator's chosen type when it
+ * survives the re-import, else the node's default. Without this the inspector
+ * shows stale rows until the operator manually re-toggles the node.
+ */
+function reconcileNodeSelectionAfterReload(state: EnterpriseState, tree: EnterpriseTreeDetail) {
+  const nodeId = state.enterpriseSelectedNodeId;
+  if (!nodeId) {
+    return;
+  }
+  if (!tree.nodes.some((node) => node.id === nodeId)) {
+    clearEnterpriseNodeSelection(state);
+    return;
+  }
+  const entities = nodeObjectEntityIds(tree, nodeId);
+  const current = state.enterpriseNodeObjectsEntity;
+  const entity = current && entities.includes(current) ? current : entities[0];
+  if (entity) {
+    void loadEnterpriseNodeObjects(state, nodeId, entity);
+  } else {
+    // Node survives but no longer scopes any object type: keep its ontology
+    // graph up, just clear the now-meaningless rows.
+    clearEnterpriseNodeObjects(state);
+  }
+}
+
+/**
+ * Expand (or collapse) a workflow node in the inspector. Selecting a node
+ * auto-loads the first object type in its scope so the panel shows live data at
+ * once; the entity list and this default derive from the same helper the view
+ * renders chips from, so the highlighted chip always matches the loaded rows.
+ */
+export function selectEnterpriseNode(state: EnterpriseState, nodeId: string | null) {
+  if (!nodeId) {
+    clearEnterpriseNodeSelection(state);
+    return;
+  }
+  clearEnterpriseNodeSelection(state);
+  state.enterpriseSelectedNodeId = nodeId;
+  const tree = state.enterpriseTreeDetail;
+  const defaultEntity = tree ? nodeObjectEntityIds(tree, nodeId)[0] : undefined;
+  if (defaultEntity) {
+    void loadEnterpriseNodeObjects(state, nodeId, defaultEntity);
+  }
+}
+
+/** Switch which entity type's instances the node inspector shows. */
+export function selectEnterpriseNodeEntity(state: EnterpriseState, entity: string) {
+  const nodeId = state.enterpriseSelectedNodeId;
+  if (!nodeId) {
+    return;
+  }
+  void loadEnterpriseNodeObjects(state, nodeId, entity);
+}
+
+/** Load one entity type's object instances for the selected node's tree. */
+async function loadEnterpriseNodeObjects(state: EnterpriseState, nodeId: string, entity: string) {
+  const treeId = state.enterpriseSelectedTreeId;
+  if (!state.client || !state.connected || !treeId) {
+    return;
+  }
+  const requestSeq = ++nodeObjectsRequestSeq;
+  state.enterpriseNodeObjectsEntity = entity;
+  state.enterpriseNodeObjects = [];
+  state.enterpriseNodeObjectsLoading = true;
+  try {
+    const res = await state.client.request<EnterpriseObjectsListResult>("enterprise.objects.list", {
+      treeId,
+      entity,
+    });
+    // A node re-selection or entity switch bumps the token; drop the stale reply.
+    if (requestSeq !== nodeObjectsRequestSeq || state.enterpriseSelectedNodeId !== nodeId) {
+      return;
+    }
+    state.enterpriseNodeObjects = res.objects;
+  } catch (err) {
+    if (requestSeq !== nodeObjectsRequestSeq) {
+      return;
+    }
+    if (isMissingOperatorReadScopeError(err)) {
+      applyError(state, err);
+    } else {
+      // Instance load failures are non-fatal to the inspector: leave the type
+      // graph up and just show no rows rather than tearing down the panel.
+      state.enterpriseNodeObjects = [];
+    }
+  } finally {
+    if (requestSeq === nodeObjectsRequestSeq) {
+      state.enterpriseNodeObjectsLoading = false;
+    }
+  }
 }
 
 /** Load the saved-revision list for the history panel (bounded server-side). */
@@ -428,6 +614,143 @@ export function setEnterpriseTreeEditContent(state: EnterpriseState, content: st
   // token drops a late format/history reseed that would clobber this text.
   editSeedSeq++;
   state.enterpriseTreeEditContent = content;
+}
+
+const NODE_ID_DRAFT_ERROR: Record<
+  ReturnType<typeof newNodeIdIssue> & string,
+  EnterpriseNodeDraftError
+> = {
+  empty: "id-empty",
+  pattern: "id-pattern",
+  duplicate: "id-duplicate",
+};
+
+/** Open the "add child node" form under `parentId` (the selected node). */
+export function beginAddEnterpriseNode(state: EnterpriseState, parentId: string) {
+  const treeId = state.enterpriseTreeDetail?.id;
+  if (!treeId) {
+    return;
+  }
+  state.enterpriseNodeDraft = { treeId, parentId, id: "", title: "", error: null };
+}
+
+/** Update the open draft's fields; any prior error clears as the operator edits. */
+export function editEnterpriseNodeDraft(
+  state: EnterpriseState,
+  patch: { id?: string; title?: string },
+) {
+  const draft = state.enterpriseNodeDraft;
+  if (!draft) {
+    return;
+  }
+  state.enterpriseNodeDraft = {
+    ...draft,
+    ...(patch.id !== undefined ? { id: patch.id } : {}),
+    ...(patch.title !== undefined ? { title: patch.title } : {}),
+    error: null,
+  };
+}
+
+export function cancelAddEnterpriseNode(state: EnterpriseState) {
+  state.enterpriseNodeDraft = null;
+}
+
+function failNodeDraft(
+  state: EnterpriseState,
+  draft: EnterpriseNodeDraft,
+  error: EnterpriseNodeDraftError,
+) {
+  state.enterpriseNodeDraft = { ...draft, error };
+}
+
+/**
+ * Validate the draft, then splice a bare child into the tree's CANONICAL nested
+ * definition (re-exported as JSON — the flat detail is lossy and JSON avoids
+ * pulling a YAML parser into the UI) and load the result into the raw editor.
+ * The operator reviews it and Saves through the existing confirm ->
+ * enterprise.trees.import flow, so node creation adds no second write path.
+ */
+export async function submitAddEnterpriseNode(state: EnterpriseState) {
+  const draft = state.enterpriseNodeDraft;
+  const tree = state.enterpriseTreeDetail;
+  // The draft must belong to the tree on screen (both clear on a tree switch, so a
+  // mismatch means a race — abort rather than splice into the wrong tree).
+  if (!draft || !tree || draft.treeId !== tree.id) {
+    return;
+  }
+  const id = draft.id.trim();
+  const title = draft.title.trim();
+  // Validate client-side against the import contract so the common mistakes show
+  // in the form, not as a raw-editor issue after a whole-tree-replace attempt.
+  const existingIds = new Set(tree.nodes.map((node) => node.id));
+  const idIssue = newNodeIdIssue(id, existingIds);
+  if (idIssue) {
+    failNodeDraft(state, draft, NODE_ID_DRAFT_ERROR[idIssue]);
+    return;
+  }
+  if (title.length === 0) {
+    failNodeDraft(state, draft, "title-empty");
+    return;
+  }
+  if (!existingIds.has(draft.parentId)) {
+    failNodeDraft(state, draft, "parent-missing");
+    return;
+  }
+  // Claim the editor seed intent: a competing Edit/New/history load started while
+  // the export is in flight supersedes this add, and applyEditorSeed re-checks it.
+  const seedSeq = ++editSeedSeq;
+  const exported = await fetchExportContent(state, tree.id, "json");
+  // Every draft mutation (edit/cancel/reopen) REPLACES the object, so an identity
+  // check rejects a submit whose form changed during the export — its captured
+  // id/title/parent would be stale. The seed token catches a competing editor load.
+  if (seedSeq !== editSeedSeq || state.enterpriseNodeDraft !== draft) {
+    return;
+  }
+  if (!exported.ok) {
+    // A scope loss already cleared governed data + set the global banner.
+    if (!exported.scopeCleared) {
+      failNodeDraft(state, draft, "export-failed");
+    }
+    return;
+  }
+  const definition = parseTreeDefinition(exported.content);
+  if (!definition) {
+    failNodeDraft(state, draft, "export-failed");
+    return;
+  }
+  const spliced = insertChildNode(definition, draft.parentId, { id, title });
+  if (!spliced.ok) {
+    // Lost a race with a concurrent change to the definition since the detail load.
+    failNodeDraft(
+      state,
+      draft,
+      spliced.reason === "duplicate-id" ? "id-duplicate" : "parent-missing",
+    );
+    return;
+  }
+  state.enterpriseNodeDraft = null;
+  applyEditorSeed(state, seedSeq, "json", tree.id, null, {
+    ok: true,
+    content: `${JSON.stringify(spliced.definition, null, 2)}\n`,
+  });
+}
+
+function parseTreeDefinition(content: string): EditableTreeDefinition | null {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    // The export is a validated definition, but guard the shape the splice needs.
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "root" in parsed &&
+      typeof (parsed as { root: unknown }).root === "object"
+    ) {
+      return parsed as EditableTreeDefinition;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -714,6 +1037,10 @@ function applyError(state: EnterpriseState, err: unknown) {
     detailRequestSeq++;
     treeRequestSeq++;
     versionsRequestSeq++;
+    // Also drop the node inspector: clearing bumps nodeObjectsRequestSeq so an
+    // in-flight enterprise.objects.list cannot write governed rows back after
+    // the scope loss, the same invariant the other tokens above enforce.
+    clearEnterpriseNodeSelection(state);
     // A pending loadEnterprise owns enterpriseLoading; since its token is now
     // stale it will skip its own finally, so clear the flag here.
     state.enterpriseLoading = false;

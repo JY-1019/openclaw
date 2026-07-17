@@ -99,6 +99,7 @@ export const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
   { name: "tasks.cancel", scope: "operator.write" },
   { name: "enterprise.trees.list", scope: "operator.read" },
   { name: "enterprise.trees.get", scope: "operator.read" },
+  { name: "enterprise.objects.list", scope: "operator.read" },
   // Import/remove persist or delete the workflow trees that drive enterprise
   // governance enforcement, so they require admin scope like config.set — a
   // narrow chat/tool operator.write token must not override managed trees.

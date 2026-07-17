@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnterpriseTreeDetail } from "../../../../packages/gateway-protocol/src/index.js";
-import { collectOntologyGraph } from "./enterprise.ts";
+import { collectOntologyGraph, nodeObjectEntityIds } from "./enterprise-ontology-graph.ts";
 
 type TreeNode = EnterpriseTreeDetail["nodes"][number];
 
@@ -142,5 +142,43 @@ describe("collectOntologyGraph", () => {
     );
     expect(result.relationships[0].cardinality).toBe("one-to-many");
     expect(result.relationships[0].inverse).toBe("account-owned-by");
+  });
+});
+
+describe("nodeObjectEntityIds", () => {
+  it("offers a chip only for object types that declare a primaryKey", () => {
+    const result = nodeObjectEntityIds(
+      tree([
+        node("root", {
+          entities: [
+            { id: "claim", properties: [{ id: "cid", type: "id", primaryKey: true }] },
+            // Descriptive properties but no primaryKey: instances can't be addressed.
+            { id: "note", properties: [{ id: "text", type: "string" }] },
+            // No properties at all.
+            { id: "policy" },
+          ],
+        }),
+      ]),
+      "root",
+    );
+    expect(result).toEqual(["claim"]);
+  });
+
+  it("counts a primaryKey a deeper step marks on an ancestor's bare property", () => {
+    const result = nodeObjectEntityIds(
+      tree([
+        node("root", { entities: [{ id: "claim", properties: [{ id: "cid", type: "id" }] }] }),
+        node(
+          "root.step",
+          {
+            entities: [{ id: "claim", properties: [{ id: "cid", type: "id", primaryKey: true }] }],
+          },
+          1,
+        ),
+      ]),
+      "root.step",
+    );
+    // The path merge folds the later primaryKey in, so the node scope sees it.
+    expect(result).toEqual(["claim"]);
   });
 });

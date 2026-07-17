@@ -16,6 +16,12 @@ export type EnterpriseId = string;
  */
 export type OntologyValueType = "string" | "number" | "boolean" | "date" | "id";
 
+/**
+ * A value an ontology property can carry. `date` and `id` are strings (ISO-8601
+ * and opaque, respectively), so the runtime carries four shapes, not five.
+ */
+export type OntologyValue = string | number | boolean | null;
+
 /** One typed field on an object type. */
 export type OntologyProperty = {
   id: EnterpriseId;
@@ -70,10 +76,21 @@ export type OntologyActionEffect = {
 };
 
 /**
- * Ontology action type: a named operation a step may perform, bound to concrete
- * tools and declaring what it reads/writes. Governance can scope policies at
- * this level (`actions` selector), so the effects are the contract that makes a
- * write-scoped policy meaningful rather than a naming convention.
+ * Ontology action type: a named operation a step may perform, declaring what it
+ * reads and writes.
+ *
+ * `effects` are the AUTHORIZATION, enforced by invoke_action: an action may only
+ * touch the object types they name, in the way they name. One declaring only
+ * `kind: read` cannot write at all. `parameters` are validated against the call,
+ * and a parameter whose id matches a property of an affected object type is what
+ * gets written to it.
+ *
+ * Governance scopes policies at this level (`actions` selector) against the
+ * action the model ACTUALLY invoked, so a policy pinned to one action denies or
+ * gates exactly that one.
+ *
+ * `preconditions` remain advisory: they are natural language, so they reach the
+ * model in the digest but nothing can enforce them. Do not read them as guarantees.
  */
 export type OntologyAction = {
   id: EnterpriseId;
@@ -85,6 +102,53 @@ export type OntologyAction = {
   /** Natural-language preconditions surfaced to the model before it acts. */
   preconditions?: string[];
   effects?: OntologyActionEffect[];
+};
+
+/**
+ * Derived value computed from one object's properties — the ontology's read-only
+ * counterpart to an action.
+ *
+ * `expression` is NOT JavaScript: it is evaluated by the closed, total op set in
+ * ontology-expression.ts. A workflow tree arrives through an import, so treating
+ * an expression as code would make "import a tree" mean "run arbitrary code".
+ * Properties are referenced with a `$` sigil ($claimed-amount), because ontology
+ * ids are hyphenated and a bare id would lex as subtraction.
+ */
+export type OntologyFunction = {
+  id: EnterpriseId;
+  title?: string;
+  description?: string;
+  /** Object type whose properties the expression reads. */
+  entity: EnterpriseId;
+  /** Closed-op expression over that entity's declared properties. */
+  expression: string;
+  /** Value type the expression yields; checked against the computed value. */
+  returns: OntologyValueType;
+};
+
+/**
+ * One object INSTANCE the tree declares up front.
+ *
+ * The tree owns what it declares: a seed is re-applied on every import, so
+ * editing the definition updates it. Objects an action creates during a run are
+ * `runtime`-provenance and are never clobbered by a re-import. Instances live in
+ * SQLite; this is the exchange format, not the runtime store.
+ */
+export type OntologyObjectSeed = {
+  /** Object type this is an instance of. */
+  entity: EnterpriseId;
+  /** Property values keyed by property id. Must carry the type's primaryKey. */
+  properties: Record<string, OntologyValue>;
+};
+
+/** One declared link between two seeded objects (instance level, not type level). */
+export type OntologyLinkSeed = {
+  /** Link type id declared under `relationships`. */
+  relationship: EnterpriseId;
+  /** primaryKey value of the source object. */
+  from: string;
+  /** primaryKey value of the target object. */
+  to: string;
 };
 
 /** Constraint the step must respect; blocking constraints join governance denials. */
@@ -102,6 +166,11 @@ export type OntologyBinding = {
   entities?: OntologyEntity[];
   relationships?: OntologyRelationship[];
   actions?: OntologyAction[];
+  functions?: OntologyFunction[];
+  /** Object instances the tree declares. Materialized into SQLite on import. */
+  objects?: OntologyObjectSeed[];
+  /** Links between the declared objects. Materialized into SQLite on import. */
+  links?: OntologyLinkSeed[];
   constraints?: OntologyConstraint[];
   /** Tool name globs allowed for this node. Empty/omitted = allow all (repo tool-policy semantics). */
   allowedTools?: string[];
@@ -325,4 +394,10 @@ export type EnterpriseRunEventKind =
   | "run.ended"
   | "governance.decision"
   | "node.entered"
-  | "node.completed";
+  | "node.completed"
+  /**
+   * An ontology action ran and wrote to the object store. The governance
+   * decision that PERMITTED it is a separate event; this one records what it
+   * actually did, which no other event captures.
+   */
+  | "action.invoked";

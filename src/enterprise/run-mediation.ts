@@ -17,6 +17,7 @@ import {
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { evaluateRunStartGovernance, resolveGovernancePolicies } from "./governance.js";
+import { collectTreeRequiredProperties } from "./ontology-runtime.js";
 import {
   buildEnterprisePromptSection,
   buildEnterpriseRunPlan,
@@ -189,6 +190,11 @@ async function beginEnterpriseRunInternal(
   const run: MediatedRunState = {
     plan,
     policies,
+    // Snapshot the tree's required-property shape from the definition this run
+    // PLANNED against. Looking it up per tool call would drift: a re-import
+    // mid-run invalidates the registry, and an in-flight write would start being
+    // judged against a tree the run never planned or prompted against.
+    treeRequiredProperties: collectTreeRequiredProperties(selection.tree),
     executionId: randomUUID(),
     allocateSeq: () => seq++,
     sink: (event) => {

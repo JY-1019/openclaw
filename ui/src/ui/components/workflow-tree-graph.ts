@@ -6,7 +6,7 @@
 // child edges of the governance hierarchy are the point, since a leaf inherits
 // every ancestor's tool/knowledge scope.
 import { css, html, LitElement, nothing, svg, type TemplateResult } from "lit";
-import { property, state } from "lit/decorators.js";
+import { property } from "lit/decorators.js";
 import { t } from "../../i18n/index.ts";
 
 export type WorkflowTreeOntology = {
@@ -169,7 +169,13 @@ export class OpenClawWorkflowTreeGraph extends LitElement {
    */
   @property({ attribute: false }) routeNodeIds: string[] | null = null;
 
-  @state() private selectedId: string | null = null;
+  /**
+   * Which node is highlighted. Controllable: a parent that owns the selection
+   * (the enterprise inspector) feeds its id back so a reload/remount restores the
+   * highlight. Uncontrolled callers (read-only route views) let clicks drive it
+   * via the optimistic update in {@link selectNode}.
+   */
+  @property({ attribute: false }) selected: string | null = null;
 
   static override styles = css`
     :host {
@@ -309,11 +315,37 @@ export class OpenClawWorkflowTreeGraph extends LitElement {
     return this.routeNodeIds ? new Set(this.routeNodeIds) : null;
   }
 
+  /**
+   * Toggle selection and tell the parent. The parent owns the id (it loads that
+   * node's object instances), so we emit the new value; the optimistic local set
+   * keeps uncontrolled callers highlighting without a round-trip. null clears.
+   */
+  private selectNode(nodeId: string): void {
+    const next = this.selected === nodeId ? null : nodeId;
+    this.selected = next;
+    this.dispatchEvent(
+      new CustomEvent<{ nodeId: string | null }>("node-select", {
+        detail: { nodeId: next },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
   override willUpdate(changed: Map<string, unknown>) {
-    if (changed.has("nodes") && this.selectedId) {
-      const stillThere = this.nodes.some((node) => node.id === this.selectedId);
+    if (changed.has("nodes") && this.selected) {
+      const stillThere = this.nodes.some((node) => node.id === this.selected);
       if (!stillThere) {
-        this.selectedId = null;
+        // The selected node was pruned (a route change, a re-import). Clear and
+        // tell the parent, or its instance panel would linger on a gone node.
+        this.selected = null;
+        this.dispatchEvent(
+          new CustomEvent<{ nodeId: string | null }>("node-select", {
+            detail: { nodeId: null },
+            bubbles: true,
+            composed: true,
+          }),
+        );
       }
     }
   }
@@ -362,7 +394,7 @@ export class OpenClawWorkflowTreeGraph extends LitElement {
     const x2 = node.x + NODE_WIDTH / 2;
     const y2 = node.y;
     const midY = (y1 + y2) / 2;
-    const onPath = this.selectedId === node.id || this.selectedId === parent.id;
+    const onPath = this.selected === node.id || this.selected === parent.id;
     // An edge belongs to the route only when both endpoints do; a half-lit edge
     // would imply the run traversed into a branch it never planned.
     const onRoute =
@@ -384,7 +416,7 @@ export class OpenClawWorkflowTreeGraph extends LitElement {
   }
 
   private renderNode(node: PlacedNode): TemplateResult {
-    const selected = this.selectedId === node.id;
+    const selected = this.selected === node.id;
     const isRoot = node.parentId === null;
     const badges = scopeBadges(node.ontology);
     const onRoute = this.routeSet?.has(node.id) ?? true;
@@ -398,12 +430,12 @@ export class OpenClawWorkflowTreeGraph extends LitElement {
         aria-selected=${selected}
         aria-label=${node.description ? `${node.title}: ${node.description}` : node.title}
         @click=${() => {
-          this.selectedId = selected ? null : node.id;
+          this.selectNode(node.id);
         }}
         @keydown=${(event: KeyboardEvent) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            this.selectedId = selected ? null : node.id;
+            this.selectNode(node.id);
           }
         }}
       >
@@ -450,7 +482,7 @@ export class OpenClawWorkflowTreeGraph extends LitElement {
   }
 
   private renderInspector(): TemplateResult | typeof nothing {
-    const id = this.selectedId;
+    const id = this.selected;
     if (!id) {
       return nothing;
     }

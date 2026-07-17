@@ -13,6 +13,10 @@ const MUTATING_TOOL_NAMES = new Set([
   "write",
   "edit",
   "apply_patch",
+  // invoke_action writes to the ontology object store. Retry/recovery replays
+  // non-mutating calls, so leaving it out would let a failed attempt re-run a
+  // write the model already performed.
+  "invoke_action",
   "exec",
   "bash",
   "process",
@@ -367,6 +371,12 @@ export function isMutatingToolCall(toolName: string, args: unknown): boolean {
     case "write":
     case "edit":
     case "apply_patch":
+    // invoke_action writes to the ontology object store. This switch — not
+    // MUTATING_TOOL_NAMES, which only feeds the name-only heuristic — is what
+    // buildToolMutationState consults, so without the case here a failed
+    // invoke_action would be classified non-mutating and cleared by any later
+    // successful tool call.
+    case "invoke_action":
     case "sessions_spawn":
     case "sessions_send":
     case "create_goal":
@@ -483,6 +493,37 @@ function buildToolActionFingerprint(
     appendFingerprintAlias(parts, record, "jobid", ["jobId", "job_id"]) || hasStableTarget;
   hasStableTarget = appendFingerprintAlias(parts, record, "id", ["id"]) || hasStableTarget;
   hasStableTarget = appendFingerprintAlias(parts, record, "model", ["model"]) || hasStableTarget;
+  // invoke_action carries its target inside a NESTED `args` object, so the
+  // top-level aliases above see nothing.
+  //
+  // The WHOLE arg set goes in, because this module cannot know which arg is the
+  // object's primary key — that is the ontology's business, and a key is only a
+  // key by declaration ("claim-id", but equally "ticket-no"). Guessing by name
+  // would fail OPEN for any key that does not look like an id: a failed write on
+  // ticket 7 would then be cleared by a successful write on ticket 8, losing the
+  // unresolved mutation error. This file's rule for mutating flows is to fail
+  // CLOSED (see isSameToolMutationAction), so it is the safe direction that wins.
+  //
+  // The cost is accepted and real: a corrective retry (same object, fixed payload)
+  // fingerprints differently and will not clear the earlier failure, so the run can
+  // still warn about a write that has since succeeded. A stale warning is strictly
+  // better than a silently-cleared failed mutation.
+  const invokeArgs = asRecord(record?.args);
+  if (invokeArgs) {
+    // JSON, not `k=v,k=v`: an ontology id or string field may itself contain "="
+    // or ",", and two different arg records could then encode to the same text —
+    // a fail-OPEN collision letting a write to one object clear a failure on
+    // another. Keys are sorted so the same call always encodes identically.
+    const canonical = JSON.stringify(
+      Object.keys(invokeArgs)
+        .toSorted()
+        .map((key) => [key, invokeArgs[key]]),
+    );
+    if (canonical !== "[]") {
+      parts.push(`args=${canonical}`);
+      hasStableTarget = true;
+    }
+  }
   const normalizedMeta = normalizeOptionalLowercaseString(meta?.trim().replace(/\s+/g, " "));
   // Meta text often carries volatile details (for example "N chars").
   // Prefer stable arg-derived keys for matching; only fall back to meta

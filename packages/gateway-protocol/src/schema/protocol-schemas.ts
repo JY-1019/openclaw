@@ -181,6 +181,9 @@ import {
   EnterpriseTreeImportIssueSchema,
   EnterpriseTreeNodeSchema,
   EnterpriseTreeOntologySchema,
+  EnterpriseObjectsListParamsSchema,
+  EnterpriseObjectsListResultSchema,
+  EnterpriseOntologyObjectSchema,
   EnterpriseTreesExportParamsSchema,
   EnterpriseTreesExportResultSchema,
   EnterpriseTreesGetParamsSchema,
@@ -612,6 +615,11 @@ export const ProtocolSchemas = {
   EnterpriseTreeDetail: EnterpriseTreeDetailSchema,
   EnterpriseTreesGetParams: EnterpriseTreesGetParamsSchema,
   EnterpriseTreesGetResult: EnterpriseTreesGetResultSchema,
+
+  // ClawWorks enterprise ontology object instances (the node inspector).
+  EnterpriseOntologyObject: EnterpriseOntologyObjectSchema,
+  EnterpriseObjectsListParams: EnterpriseObjectsListParamsSchema,
+  EnterpriseObjectsListResult: EnterpriseObjectsListResultSchema,
 
   // ClawWorks enterprise workflow-tree editing: import/export/remove + revision history.
   EnterpriseTreeImportIssue: EnterpriseTreeImportIssueSchema,
