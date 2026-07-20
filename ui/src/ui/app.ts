@@ -154,6 +154,7 @@ import type {
   CronJob,
   CronRunLogEntry,
   CronStatus,
+  EnterpriseKnowledgeFoundationSummary,
   EnterpriseOntologyObject,
   EnterpriseRunDetail,
   EnterpriseRunSummary,
@@ -519,6 +520,13 @@ export class OpenClawApp extends LitElement {
   @state() enterpriseNodeDraft: import("./controllers/enterprise.js").EnterpriseNodeDraft | null =
     null;
   @state() enterpriseError: string | null = null;
+  @state() knowledgePhase: import("./controllers/knowledge.js").KnowledgeListPhase = "unloaded";
+  @state() knowledgeFoundations: EnterpriseKnowledgeFoundationSummary[] = [];
+  @state() knowledgeConnections: Record<
+    string,
+    import("./controllers/knowledge.js").KnowledgeConnectionState
+  > = {};
+  @state() knowledgeError: string | null = null;
 
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;

@@ -46,6 +46,7 @@ import {
 } from "./controllers/dreaming.ts";
 import { refreshEnterprise, type EnterpriseState } from "./controllers/enterprise.ts";
 import { loadExecApprovals, type ExecApprovalsState } from "./controllers/exec-approvals.ts";
+import { loadKnowledgeFoundations, type KnowledgeState } from "./controllers/knowledge.ts";
 import { loadLogs, type LogsState } from "./controllers/logs.ts";
 import {
   loadModelAuthStatusState,
@@ -158,6 +159,7 @@ type SettingsAppHost = SettingsHost &
   DreamingState &
   EnterpriseState &
   ExecApprovalsState &
+  KnowledgeState &
   LogsState &
   NodesState &
   PresenceState &
@@ -468,6 +470,9 @@ export async function refreshActiveTab(host: SettingsHost, opts?: { chatStartup?
         break;
       case "enterprise":
         await refreshEnterprise(app);
+        break;
+      case "knowledge":
+        await loadKnowledgeFoundations(app);
         break;
       case "usage":
         await loadUsage(app);

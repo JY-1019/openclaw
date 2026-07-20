@@ -52,6 +52,7 @@ describe("iconForTab", () => {
       debug: "bug",
       logs: "scrollText",
       enterprise: "book",
+      knowledge: "archive",
     });
   });
 
@@ -89,6 +90,7 @@ describe("titleForTab", () => {
       debug: "Debug",
       logs: "Logs",
       enterprise: "Enterprise",
+      knowledge: "Knowledge",
     });
   });
 });
@@ -120,6 +122,7 @@ describe("subtitleForTab", () => {
       debug: "Snapshots, events, RPC.",
       logs: "Live gateway logs.",
       enterprise: "Workflow trees and governed runs.",
+      knowledge: "Registered knowledge foundations and their status.",
     });
   });
 });

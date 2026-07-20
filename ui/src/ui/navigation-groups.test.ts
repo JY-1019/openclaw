@@ -26,6 +26,7 @@ describe("TAB_GROUPS", () => {
       "usage",
       "cron",
       "enterprise",
+      "knowledge",
     ]);
     expect(SETTINGS_TABS).toContain("channels");
   });

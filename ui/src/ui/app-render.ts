@@ -141,6 +141,10 @@ import {
   saveExecApprovals,
   updateExecApprovalsFormValue,
 } from "./controllers/exec-approvals.ts";
+import {
+  loadKnowledgeFoundations,
+  testKnowledgeFoundationConnection,
+} from "./controllers/knowledge.ts";
 import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
 import { loadPresence } from "./controllers/presence.ts";
@@ -698,6 +702,7 @@ const lazyChannels = createLazyView(() => import("./views/channels.ts"), notifyL
 const lazyCron = createLazyView(() => import("./views/cron.ts"), notifyLazyViewChanged);
 const lazyDebug = createLazyView(() => import("./views/debug.ts"), notifyLazyViewChanged);
 const lazyEnterprise = createLazyView(() => import("./views/enterprise.ts"), notifyLazyViewChanged);
+const lazyKnowledge = createLazyView(() => import("./views/knowledge.ts"), notifyLazyViewChanged);
 const lazyInstances = createLazyView(() => import("./views/instances.ts"), notifyLazyViewChanged);
 const lazyLogs = createLazyView(() => import("./views/logs.ts"), notifyLazyViewChanged);
 const lazyNodes = createLazyView(() => import("./views/nodes.ts"), notifyLazyViewChanged);
@@ -2923,6 +2928,19 @@ export function renderApp(state: AppViewState) {
                 onEditNodeDraft: (patch) => editEnterpriseNodeDraft(state, patch),
                 onCancelAddNode: () => cancelAddEnterpriseNode(state),
                 onSubmitAddNode: () => void submitAddEnterpriseNode(state),
+              }),
+            )
+          : nothing}
+        ${state.tab === "knowledge"
+          ? renderLazyView(lazyKnowledge, (m) =>
+              m.renderKnowledge({
+                phase: state.knowledgePhase,
+                foundations: state.knowledgeFoundations,
+                connections: state.knowledgeConnections,
+                error: state.knowledgeError,
+                onRefresh: () => void loadKnowledgeFoundations(state),
+                onTestConnection: (foundationId) =>
+                  void testKnowledgeFoundationConnection(state, foundationId),
               }),
             )
           : nothing}

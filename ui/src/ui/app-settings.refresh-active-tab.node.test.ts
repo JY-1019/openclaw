@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   loadWikiImportInsightsMock: vi.fn(async () => {}),
   loadWikiMemoryPalaceMock: vi.fn(async () => {}),
   loadExecApprovalsMock: vi.fn(async () => {}),
+  loadKnowledgeFoundationsMock: vi.fn(async () => {}),
   loadLogsMock: vi.fn(async () => {}),
   loadModelAuthStatusStateMock: vi.fn(async () => {}),
   loadNodesMock: vi.fn(async () => {}),
@@ -108,6 +109,9 @@ vi.mock("./controllers/dreaming.ts", () => ({
 }));
 vi.mock("./controllers/exec-approvals.ts", () => ({
   loadExecApprovals: mocks.loadExecApprovalsMock,
+}));
+vi.mock("./controllers/knowledge.ts", () => ({
+  loadKnowledgeFoundations: mocks.loadKnowledgeFoundationsMock,
 }));
 vi.mock("./controllers/logs.ts", () => ({
   loadLogs: mocks.loadLogsMock,
@@ -248,6 +252,17 @@ describe("refreshActiveTab", () => {
     expect(mocks.loadDreamDiaryMock).toHaveBeenCalledWith(host);
     expect(mocks.loadWikiImportInsightsMock).toHaveBeenCalledWith(host);
     expect(mocks.loadWikiMemoryPalaceMock).toHaveBeenCalledWith(host);
+  });
+
+  it("loads knowledge foundations when the knowledge tab is active", async () => {
+    // refreshActiveTab's switch is not exhaustive, so a missing case would be a
+    // silent no-op rather than a compile error: assert the dispatch directly.
+    const host = createHost();
+    host.tab = "knowledge";
+
+    await refreshActiveTab(host as never);
+
+    expect(mocks.loadKnowledgeFoundationsMock).toHaveBeenCalledWith(host);
   });
 
   for (const panel of ["files", "skills", "channels", "tools"] as const) {

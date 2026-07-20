@@ -152,6 +152,29 @@ export const en: TranslationMap = {
     lastInput: "Last input {time}",
     reason: "Reason {reason}",
   },
+  knowledge: {
+    title: "Knowledge foundations",
+    subtitle: "Retrieval sources the knowledge_search tool can query.",
+    empty: "No knowledge foundations are registered.",
+    emptyHint: "Enable an adapter plugin (for example LightRAG) to register one.",
+    kindLocal: "local",
+    kindRemote: "remote",
+    kindLocalTitle: "This deployment administers this server's documents.",
+    kindRemoteTitle: "Operated elsewhere; read-only from here.",
+    testConnection: "Test connection",
+    testing: "Testing…",
+    statusOk: "Reachable",
+    statusFailed: "Unreachable",
+    statusUnsupported: "Not checkable",
+    statusNotRegistered: "No longer registered",
+    statusUnsupportedTitle: "This adapter does not implement a connection check.",
+    statusNotRegisteredTitle:
+      "The plugin that registered it is no longer active. Refresh the list.",
+    referencedBy: "Referenced by {count} step(s)",
+    referencedByNone: "Not referenced by any workflow step.",
+    referencedByHint:
+      "Steps whose ontology allow-list names this foundation. Edit the allow-list in the Enterprise tab.",
+  },
   enterprise: {
     title: "Enterprise",
     subtitle: "Governed workflow runs and the registered workflow trees.",
@@ -526,6 +549,7 @@ export const en: TranslationMap = {
     logs: "Logs",
     dreams: "Dreaming",
     enterprise: "Enterprise",
+    knowledge: "Knowledge",
   },
   subtitles: {
     agents: "Workspaces, tools, identities.",
@@ -552,6 +576,7 @@ export const en: TranslationMap = {
     logs: "Live gateway logs.",
     dreams: "Memory dreaming, consolidation, and reflection.",
     enterprise: "Workflow trees and governed runs.",
+    knowledge: "Registered knowledge foundations and their status.",
   },
   skillWorkshop: {
     header: {

@@ -16,6 +16,7 @@ export const TAB_GROUPS = [
       "usage",
       "cron",
       "enterprise",
+      "knowledge",
     ],
   },
   { label: "agent", tabs: ["agents", "skills", "skillWorkshop", "nodes", "dreams"] },
@@ -49,7 +50,8 @@ export type Tab =
   | "debug"
   | "logs"
   | "dreams"
-  | "enterprise";
+  | "enterprise"
+  | "knowledge";
 
 export const SETTINGS_TABS = [
   "config",
@@ -89,6 +91,7 @@ const TAB_PATHS: Record<Tab, string> = {
   logs: "/logs",
   dreams: "/dreaming",
   enterprise: "/enterprise",
+  knowledge: "/knowledge",
 };
 
 const PATH_ALIASES: Record<string, Tab> = {
@@ -240,6 +243,10 @@ export function iconForTab(tab: Tab): IconName {
       return "moon";
     case "enterprise":
       return "book";
+    case "knowledge":
+      // Not "book": it sits next to enterprise in the sidebar and the two
+      // glyphs read as the same icon at that size.
+      return "archive";
     default:
       return "folder";
   }

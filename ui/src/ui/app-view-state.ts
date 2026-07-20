@@ -41,6 +41,7 @@ import type {
   LogEntry,
   LogLevel,
   ChatModelOverride,
+  EnterpriseKnowledgeFoundationSummary,
   EnterpriseOntologyObject,
   EnterpriseRunDetail,
   EnterpriseRunSummary,
@@ -323,6 +324,13 @@ export type AppViewState = {
   enterpriseTreeVersionsLoading: boolean;
   enterpriseNodeDraft: import("./controllers/enterprise.js").EnterpriseNodeDraft | null;
   enterpriseError: string | null;
+  knowledgePhase: import("./controllers/knowledge.js").KnowledgeListPhase;
+  knowledgeFoundations: EnterpriseKnowledgeFoundationSummary[];
+  knowledgeConnections: Record<
+    string,
+    import("./controllers/knowledge.js").KnowledgeConnectionState
+  >;
+  knowledgeError: string | null;
   agentsLoading: boolean;
   agentsList: AgentsListResult | null;
   agentsError: string | null;

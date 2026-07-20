@@ -1,23 +1,11 @@
 {
-  "fallbackKeys": [
-    "enterprise.addNodeButton",
-    "enterprise.addNodeErrorExportFailed",
-    "enterprise.addNodeErrorIdDuplicate",
-    "enterprise.addNodeErrorIdEmpty",
-    "enterprise.addNodeErrorIdPattern",
-    "enterprise.addNodeErrorParentMissing",
-    "enterprise.addNodeErrorTitleEmpty",
-    "enterprise.addNodeIdLabel",
-    "enterprise.addNodeSubmit",
-    "enterprise.addNodeTitle",
-    "enterprise.addNodeTitleLabel"
-  ],
-  "generatedAt": "2026-07-15T11:28:16.689Z",
+  "fallbackKeys": [],
+  "generatedAt": "2026-07-20T03:05:52.084Z",
   "locale": "uk",
   "model": "claude-opus-4-6",
   "provider": "anthropic",
-  "sourceHash": "e6d29753fe9a7b237ee66e83b82d4a7105dda3d4486d25bf99897bb12a7ae792",
-  "totalKeys": 1508,
-  "translatedKeys": 1497,
+  "sourceHash": "448bba763d9491eb891ff589f2eafa90886ecb481c886f8845ae8b62ee61f667",
+  "totalKeys": 1529,
+  "translatedKeys": 1529,
   "workflow": 1
 }
