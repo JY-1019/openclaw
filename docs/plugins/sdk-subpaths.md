@@ -359,7 +359,7 @@ usage endpoint failed or returned no usable usage data.
   <Accordion title="Enterprise subpaths">
     | Subpath | Key exports |
     | --- | --- |
-    | `plugin-sdk/enterprise-knowledge-host` | Register a knowledge foundation adapter with the enterprise knowledge registry via `registerEnterpriseKnowledgeFoundation`, plus the `KnowledgeFoundationAdapter` and `KnowledgeSnippet` types a bundled adapter (e.g. LightRAG) implements. |
+    | `plugin-sdk/enterprise-knowledge-host` | Register a knowledge foundation adapter with the enterprise knowledge registry via `registerEnterpriseKnowledgeFoundation`, plus the `KnowledgeFoundationAdapter` and `KnowledgeSnippet` types a bundled adapter (e.g. LightRAG) implements. `KnowledgeFoundationDescriptor`, `KnowledgeFoundationKind`, and `KnowledgeFoundationConnectionResult` type the adapter's optional `describe()` / `testConnection()` methods that back the Knowledge foundations inspector. |
   </Accordion>
 
   <Accordion title="Memory subpaths">

@@ -25,6 +25,11 @@
               "type": "string",
               "description": "Base URL of the LightRAG API server (e.g. http://localhost:9621)."
             },
+            "kind": {
+              "type": "string",
+              "enum": ["remote", "local"],
+              "description": "Who administers this server's documents. 'local' means this deployment owns it, so operators may upload/remove its documents from the Knowledge tab; 'remote' means someone else operates it and it stays read-only (default: remote). Unrelated to the 'mode' retrieval setting below."
+            },
             "apiKey": {
               "type": ["string", "object"],
               "description": "LightRAG API key (X-API-Key). A string or an OpenClaw secret reference."

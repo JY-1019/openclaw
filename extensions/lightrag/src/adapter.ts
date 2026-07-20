@@ -3,6 +3,9 @@
 // snippets. The server, api key, and query mode come from plugin config.
 import type {
   KnowledgeFoundationAdapter,
+  KnowledgeFoundationConnectionResult,
+  KnowledgeFoundationDescriptor,
+  KnowledgeFoundationKind,
   KnowledgeSnippet,
 } from "openclaw/plugin-sdk/enterprise-knowledge-host";
 
@@ -12,15 +15,55 @@ export type LightRagQueryMode = "local" | "global" | "hybrid" | "naive" | "mix" 
 // LightRAG rejects queries shorter than 3 chars with HTTP 400; skip those.
 const LIGHTRAG_MIN_QUERY_CHARS = 3;
 
+// The connection probe runs on an operator click, not an agent run, so no
+// run-scoped signal bounds it; without an own timeout a hung server would hold
+// the gateway request open until the socket died.
+const LIGHTRAG_CONNECTION_TIMEOUT_MS = 5_000;
+
 type FetchLike = (input: string, init: RequestInit) => Promise<Response>;
 
 export type LightRagAdapterOptions = {
+  /** Configured foundation id; the operator-facing display name. */
+  foundationId: string;
   serverUrl: string;
+  /** Who administers this server's content (operator-declared, see config). */
+  kind: KnowledgeFoundationKind;
   mode: LightRagQueryMode;
   apiKey?: string;
   /** Override the default global fetch (tests). */
   fetchImpl?: FetchLike;
 };
+
+// Shown instead of a server url whose secret-bearing parts cannot be identified.
+const UNRECOGNIZED_SERVER_URL = "(unrecognized server url)";
+
+/**
+ * `serverUrl` reduced to a locator safe to display. `describe()` crosses the
+ * gateway into the Control UI, so this allow-lists the two components that
+ * cannot carry a secret (origin and path) rather than trying to strip the ones
+ * that can — userinfo, query, and fragment are all used by token-in-URL
+ * deployments. Anything unparseable or non-HTTP is withheld outright: its parts
+ * cannot be identified, so no substring of it is provably safe to echo.
+ */
+function stripUrlCredentials(serverUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(serverUrl);
+  } catch {
+    return UNRECOGNIZED_SERVER_URL;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return UNRECOGNIZED_SERVER_URL;
+  }
+  // `origin` excludes userinfo by construction, so no manual clearing is needed.
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, "");
+}
+
+/** Node wraps network faults as `TypeError: fetch failed` with a coded cause. */
+function connectionFailureDetail(err: unknown): string {
+  const cause = err instanceof Error ? (err.cause as { code?: unknown } | undefined) : undefined;
+  return typeof cause?.code === "string" ? cause.code : "unreachable";
+}
 
 /** One `references[]` entry in a LightRAG /query response. */
 type LightRagReference = {
@@ -35,10 +78,49 @@ type LightRagQueryResponse = {
 };
 
 export class LightRagKnowledgeFoundation implements KnowledgeFoundationAdapter {
-  private readonly endpoint: string;
+  private readonly baseUrl: string;
 
   constructor(private readonly options: LightRagAdapterOptions) {
-    this.endpoint = `${options.serverUrl.replace(/\/+$/, "")}/query`;
+    this.baseUrl = options.serverUrl.replace(/\/+$/, "");
+  }
+
+  /** Request headers with the API key attached when one is configured. */
+  private headers(extra?: Record<string, string>): Record<string, string> {
+    return {
+      ...extra,
+      ...(this.options.apiKey ? { "X-API-Key": this.options.apiKey } : {}),
+    };
+  }
+
+  describe(): KnowledgeFoundationDescriptor {
+    return {
+      kind: this.options.kind,
+      displayName: this.options.foundationId,
+      detail: stripUrlCredentials(this.options.serverUrl),
+    };
+  }
+
+  /**
+   * Probe `GET /health`, LightRAG's liveness endpoint (answers 200 even to
+   * unauthenticated callers). `/query` would also prove reachability but costs
+   * an LLM call on every operator click.
+   */
+  async testConnection(): Promise<KnowledgeFoundationConnectionResult> {
+    const fetchImpl = this.options.fetchImpl ?? fetch;
+    const timeout = AbortSignal.timeout(LIGHTRAG_CONNECTION_TIMEOUT_MS);
+    try {
+      const response = await fetchImpl(`${this.baseUrl}/health`, {
+        method: "GET",
+        headers: this.headers(),
+        signal: timeout,
+      });
+      return response.ok ? { ok: true } : { ok: false, detail: `HTTP ${response.status}` };
+    } catch (err) {
+      if (timeout.aborted) {
+        return { ok: false, detail: `timed out after ${LIGHTRAG_CONNECTION_TIMEOUT_MS}ms` };
+      }
+      return { ok: false, detail: connectionFailureDetail(err) };
+    }
   }
 
   async retrieve(params: {
@@ -51,11 +133,8 @@ export class LightRagKnowledgeFoundation implements KnowledgeFoundationAdapter {
       return [];
     }
     const fetchImpl = this.options.fetchImpl ?? fetch;
-    const headers: Record<string, string> = { "content-type": "application/json" };
-    if (this.options.apiKey) {
-      headers["X-API-Key"] = this.options.apiKey;
-    }
-    const response = await fetchImpl(this.endpoint, {
+    const headers = this.headers({ "content-type": "application/json" });
+    const response = await fetchImpl(`${this.baseUrl}/query`, {
       method: "POST",
       headers,
       body: JSON.stringify({

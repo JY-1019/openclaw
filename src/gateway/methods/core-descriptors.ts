@@ -110,6 +110,8 @@ export const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
   { name: "enterprise.trees.history.get", scope: "operator.read" },
   { name: "enterprise.runs.list", scope: "operator.read" },
   { name: "enterprise.runs.get", scope: "operator.read" },
+  { name: "enterprise.knowledge.foundations.list", scope: "operator.read" },
+  { name: "enterprise.knowledge.foundations.testConnection", scope: "operator.read" },
   { name: "enterprise.mode.get", scope: "operator.read" },
   // Switching the mode turns governance enforcement on or off for every run, so
   // it is admin like trees.import — a chat/tool operator.write token must not be

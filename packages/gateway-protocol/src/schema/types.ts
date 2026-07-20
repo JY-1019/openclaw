@@ -301,6 +301,20 @@ export type EnterpriseTreesHistoryListParams = SchemaType<"EnterpriseTreesHistor
 export type EnterpriseTreesHistoryListResult = SchemaType<"EnterpriseTreesHistoryListResult">;
 export type EnterpriseTreesHistoryGetParams = SchemaType<"EnterpriseTreesHistoryGetParams">;
 export type EnterpriseTreesHistoryGetResult = SchemaType<"EnterpriseTreesHistoryGetResult">;
+export type EnterpriseKnowledgeFoundationKind = SchemaType<"EnterpriseKnowledgeFoundationKind">;
+export type EnterpriseKnowledgeFoundationReference =
+  SchemaType<"EnterpriseKnowledgeFoundationReference">;
+export type EnterpriseKnowledgeFoundationSummary =
+  SchemaType<"EnterpriseKnowledgeFoundationSummary">;
+export type EnterpriseKnowledgeFoundationsListParams =
+  SchemaType<"EnterpriseKnowledgeFoundationsListParams">;
+export type EnterpriseKnowledgeFoundationsListResult =
+  SchemaType<"EnterpriseKnowledgeFoundationsListResult">;
+export type EnterpriseKnowledgeConnectionStatus = SchemaType<"EnterpriseKnowledgeConnectionStatus">;
+export type EnterpriseKnowledgeFoundationsTestConnectionParams =
+  SchemaType<"EnterpriseKnowledgeFoundationsTestConnectionParams">;
+export type EnterpriseKnowledgeFoundationsTestConnectionResult =
+  SchemaType<"EnterpriseKnowledgeFoundationsTestConnectionResult">;
 
 /** Logs and approval payloads for chat, exec commands, plugins, and devices. */
 export type LogsTailParams = SchemaType<"LogsTailParams">;

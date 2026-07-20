@@ -8,22 +8,45 @@ describe("parseLightRagFoundations", () => {
     expect(parseLightRagFoundations({ foundations: "nope" })).toEqual([]);
   });
 
-  it("parses valid foundations, defaults mode, and drops entries missing id/serverUrl", () => {
+  it("parses valid foundations, defaults mode/kind, and drops entries missing id/serverUrl", () => {
     const result = parseLightRagFoundations({
       foundations: [
-        { id: "acme.kb", serverUrl: "http://localhost:9621", mode: "hybrid", apiKey: "k" },
+        {
+          id: "acme.kb",
+          serverUrl: "http://localhost:9621",
+          kind: "local",
+          mode: "hybrid",
+          apiKey: "k",
+        },
         { id: "acme.default", serverUrl: "http://kb" },
         { id: "", serverUrl: "http://x" }, // blank id dropped
         { serverUrl: "http://y" }, // missing id dropped
         { id: "no.server" }, // missing serverUrl dropped
         { id: "bad.mode", serverUrl: "http://z", mode: "unknown" }, // unknown mode -> default
+        { id: "bad.kind", serverUrl: "http://z", kind: "sideways" }, // unknown kind -> default
       ],
     });
     expect(result).toEqual([
-      { id: "acme.kb", serverUrl: "http://localhost:9621", mode: "hybrid", apiKey: "k" },
-      { id: "acme.default", serverUrl: "http://kb", mode: "mix" },
-      { id: "bad.mode", serverUrl: "http://z", mode: "mix" },
+      {
+        id: "acme.kb",
+        serverUrl: "http://localhost:9621",
+        kind: "local",
+        mode: "hybrid",
+        apiKey: "k",
+      },
+      { id: "acme.default", serverUrl: "http://kb", kind: "remote", mode: "mix" },
+      { id: "bad.mode", serverUrl: "http://z", kind: "remote", mode: "mix" },
+      { id: "bad.kind", serverUrl: "http://z", kind: "remote", mode: "mix" },
     ]);
+  });
+
+  it("defaults kind to remote so an upgrade never exposes document management", () => {
+    // Foundations configured before `kind` existed must stay read-only: the
+    // operator has not declared that server as theirs to administer.
+    const [foundation] = parseLightRagFoundations({
+      foundations: [{ id: "legacy.kb", serverUrl: "http://kb" }],
+    });
+    expect(foundation.kind).toBe("remote");
   });
 
   it("drops a non-string apiKey (secret refs are resolved to strings upstream)", () => {
@@ -34,6 +57,6 @@ describe("parseLightRagFoundations", () => {
     const result = parseLightRagFoundations({
       foundations: [{ id: "kb", serverUrl: "http://kb", apiKey: { $secret: "lightrag-key" } }],
     });
-    expect(result).toEqual([{ id: "kb", serverUrl: "http://kb", mode: "mix" }]);
+    expect(result).toEqual([{ id: "kb", serverUrl: "http://kb", kind: "remote", mode: "mix" }]);
   });
 });

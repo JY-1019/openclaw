@@ -262,6 +262,22 @@ import {
   EnterpriseTreesHistoryListParamsSchema,
   type EnterpriseTreesHistoryListResult,
   EnterpriseTreesHistoryListResultSchema,
+  type EnterpriseKnowledgeConnectionStatus,
+  EnterpriseKnowledgeConnectionStatusSchema,
+  type EnterpriseKnowledgeFoundationKind,
+  EnterpriseKnowledgeFoundationKindSchema,
+  type EnterpriseKnowledgeFoundationReference,
+  EnterpriseKnowledgeFoundationReferenceSchema,
+  type EnterpriseKnowledgeFoundationsListParams,
+  EnterpriseKnowledgeFoundationsListParamsSchema,
+  type EnterpriseKnowledgeFoundationsListResult,
+  EnterpriseKnowledgeFoundationsListResultSchema,
+  type EnterpriseKnowledgeFoundationsTestConnectionParams,
+  EnterpriseKnowledgeFoundationsTestConnectionParamsSchema,
+  type EnterpriseKnowledgeFoundationsTestConnectionResult,
+  EnterpriseKnowledgeFoundationsTestConnectionResultSchema,
+  type EnterpriseKnowledgeFoundationSummary,
+  EnterpriseKnowledgeFoundationSummarySchema,
   type EnterpriseTreesHistoryGetParams,
   EnterpriseTreesHistoryGetParamsSchema,
   type EnterpriseTreesHistoryGetResult,
@@ -812,6 +828,14 @@ export const validateEnterpriseTreesHistoryListParams =
 export const validateEnterpriseTreesHistoryGetParams = lazyCompile<EnterpriseTreesHistoryGetParams>(
   EnterpriseTreesHistoryGetParamsSchema,
 );
+export const validateEnterpriseKnowledgeFoundationsListParams =
+  lazyCompile<EnterpriseKnowledgeFoundationsListParams>(
+    EnterpriseKnowledgeFoundationsListParamsSchema,
+  );
+export const validateEnterpriseKnowledgeFoundationsTestConnectionParams =
+  lazyCompile<EnterpriseKnowledgeFoundationsTestConnectionParams>(
+    EnterpriseKnowledgeFoundationsTestConnectionParamsSchema,
+  );
 export const validateConfigGetParams = lazyCompile<ConfigGetParams>(ConfigGetParamsSchema);
 export const validateConfigSetParams = lazyCompile<ConfigSetParams>(ConfigSetParamsSchema);
 export const validateConfigApplyParams = lazyCompile<ConfigApplyParams>(ConfigApplyParamsSchema);
@@ -1218,6 +1242,14 @@ export {
   EnterpriseTreesHistoryListResultSchema,
   EnterpriseTreesHistoryGetParamsSchema,
   EnterpriseTreesHistoryGetResultSchema,
+  EnterpriseKnowledgeFoundationKindSchema,
+  EnterpriseKnowledgeFoundationReferenceSchema,
+  EnterpriseKnowledgeFoundationSummarySchema,
+  EnterpriseKnowledgeFoundationsListParamsSchema,
+  EnterpriseKnowledgeFoundationsListResultSchema,
+  EnterpriseKnowledgeConnectionStatusSchema,
+  EnterpriseKnowledgeFoundationsTestConnectionParamsSchema,
+  EnterpriseKnowledgeFoundationsTestConnectionResultSchema,
   ConfigGetParamsSchema,
   ConfigSetParamsSchema,
   ConfigApplyParamsSchema,
@@ -1571,6 +1603,14 @@ export type {
   EnterpriseTreesHistoryListResult,
   EnterpriseTreesHistoryGetParams,
   EnterpriseTreesHistoryGetResult,
+  EnterpriseKnowledgeFoundationKind,
+  EnterpriseKnowledgeFoundationReference,
+  EnterpriseKnowledgeFoundationSummary,
+  EnterpriseKnowledgeFoundationsListParams,
+  EnterpriseKnowledgeFoundationsListResult,
+  EnterpriseKnowledgeConnectionStatus,
+  EnterpriseKnowledgeFoundationsTestConnectionParams,
+  EnterpriseKnowledgeFoundationsTestConnectionResult,
   CronJob,
   CronListParams,
   CronStatusParams,

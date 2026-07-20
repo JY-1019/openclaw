@@ -13,7 +13,12 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { evaluateKnowledgeRetrievalGovernance } from "./governance.js";
 import { findPlanNode, resolvePlanNodePath } from "./plan.js";
 import { getEnterpriseActiveRun, type EnterpriseRunTraceSink } from "./runtime.js";
-import type { EnterprisePlanNode, KnowledgeFoundationAdapter, KnowledgeSnippet } from "./types.js";
+import type {
+  EnterprisePlanNode,
+  KnowledgeFoundationAdapter,
+  KnowledgeFoundationDescriptor,
+  KnowledgeSnippet,
+} from "./types.js";
 
 const DEFAULT_KNOWLEDGE_LIMIT = 5;
 
@@ -67,6 +72,85 @@ export function restoreEnterpriseKnowledgeFoundations(
 /** Clear all registered foundations (plugin loader activation reset + tests). */
 export function clearEnterpriseKnowledgeFoundations(): void {
   foundations().clear();
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** One registered foundation with its operator-facing descriptor. */
+export type EnterpriseKnowledgeFoundationEntry = {
+  foundationId: string;
+  descriptor: KnowledgeFoundationDescriptor;
+};
+
+/**
+ * Every registered foundation with a descriptor, in the same sorted order as
+ * `listEnterpriseKnowledgeFoundationIds`. Adapters written against the
+ * retrieval-only contract (no `describe`) get a neutral fallback, so the
+ * inspector lists them rather than hiding what it cannot introspect.
+ */
+export function listEnterpriseKnowledgeFoundationDescriptors(): EnterpriseKnowledgeFoundationEntry[] {
+  return listEnterpriseKnowledgeFoundationIds().map((foundationId) => ({
+    foundationId,
+    descriptor: describeFoundation(foundationId),
+  }));
+}
+
+function describeFoundation(foundationId: string): KnowledgeFoundationDescriptor {
+  const adapter = foundations().get(foundationId);
+  const fallback: KnowledgeFoundationDescriptor = { kind: "remote", displayName: foundationId };
+  if (!adapter?.describe) {
+    return fallback;
+  }
+  try {
+    return adapter.describe();
+  } catch (err) {
+    // A plugin-side describe() fault degrades one row to the fallback instead
+    // of blanking the whole inspector list (same containment as retrieval).
+    log.warn(
+      `enterprise knowledge foundation "${foundationId}" describe failed: ${errorMessage(err)}`,
+    );
+    return fallback;
+  }
+}
+
+/**
+ * Host-level outcome of a connection probe. Wider than the adapter's own
+ * `{ok}` because only the host can know an id is unregistered or that the
+ * adapter cannot probe at all — the inspector renders those differently from a
+ * server that answered "unreachable".
+ */
+export type KnowledgeFoundationConnectionStatus = {
+  status: "ok" | "failed" | "unsupported" | "not-registered";
+  detail?: string;
+};
+
+/** Probe one foundation's backing service for the operator inspector. */
+export async function testEnterpriseKnowledgeFoundationConnection(
+  foundationId: string,
+): Promise<KnowledgeFoundationConnectionStatus> {
+  const adapter = foundations().get(foundationId);
+  if (!adapter) {
+    return { status: "not-registered" };
+  }
+  if (!adapter.testConnection) {
+    return { status: "unsupported" };
+  }
+  try {
+    const result = await adapter.testConnection();
+    return {
+      status: result.ok ? "ok" : "failed",
+      ...(result.detail !== undefined ? { detail: result.detail } : {}),
+    };
+  } catch (err) {
+    // Keep raw adapter errors (which may carry urls/credentials) out of the
+    // operator-facing detail; log the specifics out-of-band like retrieval does.
+    log.warn(
+      `enterprise knowledge foundation "${foundationId}" connection test failed: ${errorMessage(err)}`,
+    );
+    return { status: "failed", detail: "connection test failed" };
+  }
 }
 
 /**

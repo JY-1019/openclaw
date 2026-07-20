@@ -244,6 +244,7 @@ servers:
             {
               "id": "acme.support-kb",
               "serverUrl": "http://localhost:9621",
+              "kind": "remote",
               "apiKey": "${LIGHTRAG_API_KEY}",
               "mode": "mix",
             },
@@ -258,6 +259,16 @@ servers:
 A node references the foundation by id in `knowledgeFoundations`. One
 foundation failing (for example a down server) skips that foundation rather
 than failing the whole retrieval.
+
+Each foundation declares a `kind`: `remote` (default) when someone else
+operates the server, or `local` when this deployment owns it. The distinction
+is an explicit operator declaration, not something inferred from the URL, and it
+decides whether operators may manage that foundation's documents.
+
+Adapters may optionally implement `describe()` and `testConnection()` (see
+`plugin-sdk/enterprise-knowledge-host`) to report their kind, display name, and
+live reachability. Adapters that implement neither still work — they are listed
+with a neutral descriptor and report their connection status as unsupported.
 
 ## Inspecting runs
 

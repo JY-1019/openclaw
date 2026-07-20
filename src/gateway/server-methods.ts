@@ -348,6 +348,8 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
       "enterprise.trees.history.get",
       "enterprise.runs.list",
       "enterprise.runs.get",
+      "enterprise.knowledge.foundations.list",
+      "enterprise.knowledge.foundations.testConnection",
       "enterprise.mode.get",
       "enterprise.mode.set",
     ],

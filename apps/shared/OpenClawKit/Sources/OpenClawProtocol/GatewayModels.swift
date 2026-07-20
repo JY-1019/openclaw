@@ -57,6 +57,18 @@ public enum SessionFileRelevance: String, Codable, Sendable {
     case mixed = "mixed"
 }
 
+public enum EnterpriseKnowledgeFoundationKind: String, Codable, Sendable {
+    case remote = "remote"
+    case local = "local"
+}
+
+public enum EnterpriseKnowledgeConnectionStatus: String, Codable, Sendable {
+    case ok = "ok"
+    case failed = "failed"
+    case unsupported = "unsupported"
+    case notRegistered = "not-registered"
+}
+
 public struct ConnectParams: Codable, Sendable {
     public let minprotocol: Int
     public let maxprotocol: Int
@@ -7284,6 +7296,110 @@ public struct EnterpriseTreesHistoryGetResult: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case content
         case savedat = "savedAt"
+    }
+}
+
+public struct EnterpriseKnowledgeFoundationReference: Codable, Sendable {
+    public let treeid: String
+    public let treename: String
+    public let nodeid: String
+    public let nodetitle: String
+
+    public init(
+        treeid: String,
+        treename: String,
+        nodeid: String,
+        nodetitle: String)
+    {
+        self.treeid = treeid
+        self.treename = treename
+        self.nodeid = nodeid
+        self.nodetitle = nodetitle
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case treeid = "treeId"
+        case treename = "treeName"
+        case nodeid = "nodeId"
+        case nodetitle = "nodeTitle"
+    }
+}
+
+public struct EnterpriseKnowledgeFoundationSummary: Codable, Sendable {
+    public let id: String
+    public let kind: EnterpriseKnowledgeFoundationKind
+    public let displayname: String
+    public let detail: String?
+    public let referencedby: [EnterpriseKnowledgeFoundationReference]
+
+    public init(
+        id: String,
+        kind: EnterpriseKnowledgeFoundationKind,
+        displayname: String,
+        detail: String?,
+        referencedby: [EnterpriseKnowledgeFoundationReference])
+    {
+        self.id = id
+        self.kind = kind
+        self.displayname = displayname
+        self.detail = detail
+        self.referencedby = referencedby
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case kind
+        case displayname = "displayName"
+        case detail
+        case referencedby = "referencedBy"
+    }
+}
+
+public struct EnterpriseKnowledgeFoundationsListParams: Codable, Sendable {}
+
+public struct EnterpriseKnowledgeFoundationsListResult: Codable, Sendable {
+    public let foundations: [EnterpriseKnowledgeFoundationSummary]
+
+    public init(
+        foundations: [EnterpriseKnowledgeFoundationSummary])
+    {
+        self.foundations = foundations
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case foundations
+    }
+}
+
+public struct EnterpriseKnowledgeFoundationsTestConnectionParams: Codable, Sendable {
+    public let foundationid: String
+
+    public init(
+        foundationid: String)
+    {
+        self.foundationid = foundationid
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case foundationid = "foundationId"
+    }
+}
+
+public struct EnterpriseKnowledgeFoundationsTestConnectionResult: Codable, Sendable {
+    public let status: EnterpriseKnowledgeConnectionStatus
+    public let detail: String?
+
+    public init(
+        status: EnterpriseKnowledgeConnectionStatus,
+        detail: String?)
+    {
+        self.status = status
+        self.detail = detail
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case detail
     }
 }
 

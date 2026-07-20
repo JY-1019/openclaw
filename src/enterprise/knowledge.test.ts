@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   clearEnterpriseKnowledgeFoundations,
   InMemoryKnowledgeFoundation,
+  listEnterpriseKnowledgeFoundationDescriptors,
   listEnterpriseKnowledgeFoundationIds,
   listEnterpriseKnowledgeFoundations,
   registerEnterpriseKnowledgeFoundation,
   resolveEnterpriseKnowledge,
   restoreEnterpriseKnowledgeFoundations,
+  testEnterpriseKnowledgeFoundationConnection,
 } from "./knowledge.js";
 import {
   clearEnterpriseActiveRunsForTest,
@@ -242,5 +244,102 @@ describe("resolveEnterpriseKnowledge", () => {
     expect(result.snippets.map((snippet) => snippet.foundationId)).toEqual(["acme.secret"]);
     expect(result.skipped).toHaveLength(0);
     expect(events.some((event) => event.payload.enforced === false)).toBe(true);
+  });
+});
+
+describe("foundation descriptors", () => {
+  it("uses the adapter's describe() when it implements one", () => {
+    registerEnterpriseKnowledgeFoundation("acme.kb", {
+      retrieve: async () => [],
+      describe: () => ({ kind: "local", displayName: "Acme KB", detail: "http://kb:9621" }),
+    });
+
+    expect(listEnterpriseKnowledgeFoundationDescriptors()).toEqual([
+      {
+        foundationId: "acme.kb",
+        descriptor: { kind: "local", displayName: "Acme KB", detail: "http://kb:9621" },
+      },
+    ]);
+  });
+
+  it("falls back for a retrieval-only adapter written before describe() existed", () => {
+    registerEnterpriseKnowledgeFoundation("legacy.kb", foundation("anything"));
+
+    expect(listEnterpriseKnowledgeFoundationDescriptors()).toEqual([
+      { foundationId: "legacy.kb", descriptor: { kind: "remote", displayName: "legacy.kb" } },
+    ]);
+  });
+
+  it("degrades one row instead of blanking the list when describe() throws", () => {
+    registerEnterpriseKnowledgeFoundation("broken.kb", {
+      retrieve: async () => [],
+      describe: () => {
+        throw new Error("plugin bug");
+      },
+    });
+    registerEnterpriseKnowledgeFoundation("healthy.kb", {
+      retrieve: async () => [],
+      describe: () => ({ kind: "remote", displayName: "Healthy" }),
+    });
+
+    expect(listEnterpriseKnowledgeFoundationDescriptors()).toEqual([
+      { foundationId: "broken.kb", descriptor: { kind: "remote", displayName: "broken.kb" } },
+      { foundationId: "healthy.kb", descriptor: { kind: "remote", displayName: "Healthy" } },
+    ]);
+  });
+});
+
+describe("testEnterpriseKnowledgeFoundationConnection", () => {
+  it("maps a reachable adapter to ok and carries its detail", async () => {
+    registerEnterpriseKnowledgeFoundation("acme.kb", {
+      retrieve: async () => [],
+      testConnection: async () => ({ ok: true, detail: "healthy" }),
+    });
+
+    expect(await testEnterpriseKnowledgeFoundationConnection("acme.kb")).toEqual({
+      status: "ok",
+      detail: "healthy",
+    });
+  });
+
+  it("maps an unreachable adapter to failed", async () => {
+    registerEnterpriseKnowledgeFoundation("acme.kb", {
+      retrieve: async () => [],
+      testConnection: async () => ({ ok: false, detail: "ECONNREFUSED" }),
+    });
+
+    expect(await testEnterpriseKnowledgeFoundationConnection("acme.kb")).toEqual({
+      status: "failed",
+      detail: "ECONNREFUSED",
+    });
+  });
+
+  it("reports unsupported separately from unreachable for a probe-less adapter", async () => {
+    registerEnterpriseKnowledgeFoundation("legacy.kb", foundation("anything"));
+
+    expect(await testEnterpriseKnowledgeFoundationConnection("legacy.kb")).toEqual({
+      status: "unsupported",
+    });
+  });
+
+  it("reports an unregistered id rather than claiming the server is down", async () => {
+    expect(await testEnterpriseKnowledgeFoundationConnection("ghost.kb")).toEqual({
+      status: "not-registered",
+    });
+  });
+
+  it("keeps a thrown adapter error's detail out of the operator-facing result", async () => {
+    registerEnterpriseKnowledgeFoundation("acme.kb", {
+      retrieve: async () => [],
+      testConnection: async () => {
+        throw new Error("connect http://admin:hunter2@kb:9621 refused");
+      },
+    });
+
+    // The raw message can carry urls/credentials; it belongs in the log only.
+    expect(await testEnterpriseKnowledgeFoundationConnection("acme.kb")).toEqual({
+      status: "failed",
+      detail: "connection test failed",
+    });
   });
 });

@@ -368,9 +368,43 @@ export type KnowledgeSnippet = {
 };
 
 /**
+ * Who administers a foundation's content. "local" means the backing server is
+ * one this deployment owns, so an operator may manage its documents from here;
+ * "remote" means someone else operates it and it is read-only to us. This is an
+ * explicit operator declaration, not something inferred from the URL shape — a
+ * localhost address can front a shared corpus, and a public hostname can front
+ * a server this deployment owns.
+ */
+export type KnowledgeFoundationKind = "remote" | "local";
+
+/** Operator-facing identity of one registered foundation. */
+export type KnowledgeFoundationDescriptor = {
+  kind: KnowledgeFoundationKind;
+  displayName: string;
+  /**
+   * Short non-secret locator (e.g. a server origin) shown to operators.
+   * Adapters must strip credentials before putting anything here: this crosses
+   * the gateway to the Control UI, unlike raw adapter errors which stay logged
+   * out-of-band (see resolveEnterpriseKnowledge's catch).
+   */
+  detail?: string;
+};
+
+/** Outcome of probing whether a foundation's backing service is reachable. */
+export type KnowledgeFoundationConnectionResult = {
+  ok: boolean;
+  /** Non-secret human-readable status/reason, surfaced to operators. */
+  detail?: string;
+};
+
+/**
  * Adapter that retrieves from one knowledge foundation. Plugins (e.g. LightRAG)
  * register an adapter per foundation id; the built-in in-memory adapter serves
  * examples and tests.
+ *
+ * Only `retrieve` is required. The rest are optional so an adapter written
+ * against the retrieval-only contract keeps working unchanged; callers fall
+ * back (describe) or report "not supported" (testConnection) when absent.
  */
 export type KnowledgeFoundationAdapter = {
   retrieve(params: {
@@ -380,6 +414,15 @@ export type KnowledgeFoundationAdapter = {
     /** Aborts when the agent run is cancelled/timed out; remote adapters honor it. */
     signal?: AbortSignal;
   }): Promise<KnowledgeSnippet[]>;
+  /** Operator-facing identity for the foundations inspector. */
+  describe?(): KnowledgeFoundationDescriptor;
+  /**
+   * Probe reachability for the inspector's "test connection" action. Takes no
+   * signal: this runs on an operator request rather than an agent run, so there
+   * is nothing run-scoped to cancel it, and the adapter owns a bounding timeout
+   * instead. (Adding a signal later stays additive; removing one would not.)
+   */
+  testConnection?(): Promise<KnowledgeFoundationConnectionResult>;
 };
 
 /**

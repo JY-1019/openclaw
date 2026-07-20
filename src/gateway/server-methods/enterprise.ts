@@ -3,6 +3,10 @@
 // enterprise tab). The wire shapes trim the model-visible plan/ontology to the
 // execution-scoping fields an inspector renders; the internal records carry more.
 import {
+  type EnterpriseKnowledgeFoundationReference,
+  type EnterpriseKnowledgeFoundationsListResult,
+  type EnterpriseKnowledgeFoundationsTestConnectionResult,
+  type EnterpriseKnowledgeFoundationSummary,
   type EnterprisePlanNode,
   type EnterpriseRunDetail,
   type EnterpriseRunEvent,
@@ -22,6 +26,8 @@ import {
   ErrorCodes,
   errorShape,
   formatValidationErrors,
+  validateEnterpriseKnowledgeFoundationsListParams,
+  validateEnterpriseKnowledgeFoundationsTestConnectionParams,
   validateEnterpriseObjectsListParams,
   validateEnterpriseRunsGetParams,
   validateEnterpriseRunsListParams,
@@ -38,6 +44,10 @@ import {
 import { readConfigFileSnapshotForWrite } from "../../config/io.js";
 import { getRuntimeConfigSnapshot } from "../../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import {
+  listEnterpriseKnowledgeFoundationDescriptors,
+  testEnterpriseKnowledgeFoundationConnection,
+} from "../../enterprise/knowledge.js";
 import {
   addressableObjectEntityIds,
   searchOntologyObjects,
@@ -259,6 +269,41 @@ function flattenTreeNodes(root: WorkflowNodeDefinition): EnterpriseTreeNode[] {
   return nodes;
 }
 
+/**
+ * Index every node that names a foundation in its ontology allow-list, keyed by
+ * foundation id. Built once per list call: resolving each foundation by
+ * re-walking every tree would be quadratic, and the registry already holds the
+ * whole tree set in memory.
+ */
+function indexKnowledgeFoundationReferences(): Map<
+  string,
+  EnterpriseKnowledgeFoundationReference[]
+> {
+  const index = new Map<string, EnterpriseKnowledgeFoundationReference[]>();
+  for (const entry of getWorkflowTreeRegistrySnapshot().entries) {
+    const walk = (node: WorkflowNodeDefinition): void => {
+      // Dedupe per node: an allow-list may repeat an id (an authoring typo the
+      // schema permits and retrieval ignores), which would otherwise show the
+      // same node twice in the inspector's "referenced by" list.
+      for (const foundationId of new Set(node.ontology?.knowledgeFoundations ?? [])) {
+        const references = index.get(foundationId) ?? [];
+        references.push({
+          treeId: entry.tree.id,
+          treeName: entry.tree.name,
+          nodeId: node.id,
+          nodeTitle: node.title,
+        });
+        index.set(foundationId, references);
+      }
+      for (const child of node.children ?? []) {
+        walk(child);
+      }
+    };
+    walk(entry.tree.root);
+  }
+  return index;
+}
+
 function mapTreeMatch(match: WorkflowTreeMatch): NonNullable<EnterpriseTreeDetail["match"]> {
   // Clone the shared registry arrays so payload mutation can't affect selection.
   const projected: NonNullable<EnterpriseTreeDetail["match"]> = {};
@@ -294,6 +339,59 @@ function buildTreeDetail(entry: WorkflowTreeRegistryEntry): EnterpriseTreeDetail
 }
 
 export const enterpriseHandlers: GatewayRequestHandlers = {
+  "enterprise.knowledge.foundations.list": ({ params, respond }) => {
+    if (!validateEnterpriseKnowledgeFoundationsListParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid enterprise.knowledge.foundations.list params: ${formatValidationErrors(validateEnterpriseKnowledgeFoundationsListParams.errors)}`,
+        ),
+      );
+      return;
+    }
+    const references = indexKnowledgeFoundationReferences();
+    const result: EnterpriseKnowledgeFoundationsListResult = {
+      foundations: listEnterpriseKnowledgeFoundationDescriptors().map(
+        ({ foundationId, descriptor }): EnterpriseKnowledgeFoundationSummary => {
+          const summary: EnterpriseKnowledgeFoundationSummary = {
+            id: foundationId,
+            kind: descriptor.kind,
+            displayName: descriptor.displayName,
+            referencedBy: references.get(foundationId) ?? [],
+          };
+          if (descriptor.detail !== undefined) {
+            summary.detail = descriptor.detail;
+          }
+          return summary;
+        },
+      ),
+    };
+    respond(true, result);
+  },
+  "enterprise.knowledge.foundations.testConnection": async ({ params, respond }) => {
+    if (!validateEnterpriseKnowledgeFoundationsTestConnectionParams(params)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `invalid enterprise.knowledge.foundations.testConnection params: ${formatValidationErrors(validateEnterpriseKnowledgeFoundationsTestConnectionParams.errors)}`,
+        ),
+      );
+      return;
+    }
+    // An unregistered id and an unprobeable adapter are reported as statuses,
+    // not errors: the inspector renders them as their own chips, and a list the
+    // operator loaded a moment ago can legitimately go stale under a reload.
+    const outcome = await testEnterpriseKnowledgeFoundationConnection(params.foundationId);
+    const result: EnterpriseKnowledgeFoundationsTestConnectionResult = {
+      status: outcome.status,
+      ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+    };
+    respond(true, result);
+  },
   "enterprise.trees.list": ({ params, respond }) => {
     if (!validateEnterpriseTreesListParams(params)) {
       respond(

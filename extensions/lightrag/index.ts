@@ -19,7 +19,9 @@ export default definePluginEntry({
       registerEnterpriseKnowledgeFoundation(
         descriptor.id,
         new LightRagKnowledgeFoundation({
+          foundationId: descriptor.id,
           serverUrl: descriptor.serverUrl,
+          kind: descriptor.kind,
           mode: descriptor.mode,
           ...(descriptor.apiKey !== undefined ? { apiKey: descriptor.apiKey } : {}),
         }),

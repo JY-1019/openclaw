@@ -166,6 +166,14 @@ import {
 import {
   EnterprisePlanNodeSchema,
   EnterpriseRunDetailSchema,
+  EnterpriseKnowledgeConnectionStatusSchema,
+  EnterpriseKnowledgeFoundationKindSchema,
+  EnterpriseKnowledgeFoundationReferenceSchema,
+  EnterpriseKnowledgeFoundationsListParamsSchema,
+  EnterpriseKnowledgeFoundationsListResultSchema,
+  EnterpriseKnowledgeFoundationsTestConnectionParamsSchema,
+  EnterpriseKnowledgeFoundationsTestConnectionResultSchema,
+  EnterpriseKnowledgeFoundationSummarySchema,
   EnterpriseModeGetParamsSchema,
   EnterpriseModeGetResultSchema,
   EnterpriseModeSetParamsSchema,
@@ -634,6 +642,18 @@ export const ProtocolSchemas = {
   EnterpriseTreesHistoryListResult: EnterpriseTreesHistoryListResultSchema,
   EnterpriseTreesHistoryGetParams: EnterpriseTreesHistoryGetParamsSchema,
   EnterpriseTreesHistoryGetResult: EnterpriseTreesHistoryGetResultSchema,
+
+  // ClawWorks enterprise knowledge foundations (the Knowledge inspector).
+  EnterpriseKnowledgeFoundationKind: EnterpriseKnowledgeFoundationKindSchema,
+  EnterpriseKnowledgeFoundationReference: EnterpriseKnowledgeFoundationReferenceSchema,
+  EnterpriseKnowledgeFoundationSummary: EnterpriseKnowledgeFoundationSummarySchema,
+  EnterpriseKnowledgeFoundationsListParams: EnterpriseKnowledgeFoundationsListParamsSchema,
+  EnterpriseKnowledgeFoundationsListResult: EnterpriseKnowledgeFoundationsListResultSchema,
+  EnterpriseKnowledgeConnectionStatus: EnterpriseKnowledgeConnectionStatusSchema,
+  EnterpriseKnowledgeFoundationsTestConnectionParams:
+    EnterpriseKnowledgeFoundationsTestConnectionParamsSchema,
+  EnterpriseKnowledgeFoundationsTestConnectionResult:
+    EnterpriseKnowledgeFoundationsTestConnectionResultSchema,
 
   LogsTailParams: LogsTailParamsSchema,
   LogsTailResult: LogsTailResultSchema,

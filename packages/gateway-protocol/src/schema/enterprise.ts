@@ -566,3 +566,75 @@ export const EnterpriseModeSetResultSchema = Type.Object(
   { mode: EnterpriseModeSchema },
   { additionalProperties: false },
 );
+
+/**
+ * Who administers a knowledge foundation's content (mirrors
+ * KnowledgeFoundationKind). Operator-declared, not inferred from the URL.
+ */
+export const EnterpriseKnowledgeFoundationKindSchema = Type.Union([
+  Type.Literal("remote"),
+  Type.Literal("local"),
+]);
+
+/** One node that names a foundation in its ontology allow-list. */
+export const EnterpriseKnowledgeFoundationReferenceSchema = Type.Object(
+  {
+    treeId: NonEmptyString,
+    treeName: Type.String(),
+    nodeId: NonEmptyString,
+    nodeTitle: Type.String(),
+  },
+  { additionalProperties: false },
+);
+
+/** One registered foundation, summarized for the Knowledge inspector. */
+export const EnterpriseKnowledgeFoundationSummarySchema = Type.Object(
+  {
+    id: NonEmptyString,
+    kind: EnterpriseKnowledgeFoundationKindSchema,
+    displayName: Type.String(),
+    /** Non-secret locator (e.g. server origin); adapters strip credentials. */
+    detail: Type.Optional(Type.String()),
+    /** Nodes whose ontology allow-list names this foundation. */
+    referencedBy: Type.Array(EnterpriseKnowledgeFoundationReferenceSchema),
+  },
+  { additionalProperties: false },
+);
+
+/** Foundation list request (the registry is process-local and small). */
+export const EnterpriseKnowledgeFoundationsListParamsSchema = Type.Object(
+  {},
+  { additionalProperties: false },
+);
+
+export const EnterpriseKnowledgeFoundationsListResultSchema = Type.Object(
+  {
+    foundations: Type.Array(EnterpriseKnowledgeFoundationSummarySchema),
+  },
+  { additionalProperties: false },
+);
+
+/**
+ * Connection probe outcome. Wider than the adapter's own ok/failed because only
+ * the host knows an id went away or that the adapter cannot probe at all — the
+ * inspector renders those differently from a server answering "unreachable".
+ */
+export const EnterpriseKnowledgeConnectionStatusSchema = Type.Union([
+  Type.Literal("ok"),
+  Type.Literal("failed"),
+  Type.Literal("unsupported"),
+  Type.Literal("not-registered"),
+]);
+
+export const EnterpriseKnowledgeFoundationsTestConnectionParamsSchema = Type.Object(
+  { foundationId: NonEmptyString },
+  { additionalProperties: false },
+);
+
+export const EnterpriseKnowledgeFoundationsTestConnectionResultSchema = Type.Object(
+  {
+    status: EnterpriseKnowledgeConnectionStatusSchema,
+    detail: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
