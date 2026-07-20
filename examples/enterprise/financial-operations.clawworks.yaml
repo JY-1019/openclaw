@@ -29,11 +29,22 @@
 #
 # THE ONTOLOGY
 # ------------
-# The root declares the ontology once: object types with typed properties (one
-# primaryKey each) and link types with cardinality. Every step below operates ON
-# that ontology — leaf nodes declare action types whose `effects` name exactly
-# which object type they read, create, update, or delete, and bind those actions
-# to concrete tools.
+# Object types (typed properties, one primaryKey each) and link types (with
+# cardinality) are declared by the DOMAIN that operates on them, not at the root.
+# A node sees only the types on its own root→node path, so a root-declared type
+# is addressable from all 40 steps — which is the same as no scoping at all.
+# Declaring per domain is what makes `finops.claims` unable to address `sar` and
+# `finops.risk` unable to address `payment`.
+#
+# A type two domains both use is RE-DECLARED in each (the schema allows it as
+# long as the property types agree), and a re-declaration may be NARROWER on
+# purpose: reporting gets `claim` without `fraud-score`, because it reports on
+# claims rather than adjudicating them.
+#
+# Every step operates ON that ontology — leaf nodes declare action types whose
+# `effects` name exactly which object type they read, create, update, or delete,
+# and bind those actions to concrete tools. An action can only name a type that
+# is on its own path, so the declarations above it are its write surface.
 #
 # WHAT IS ACTUALLY ENFORCED TODAY (do not read more into the fields than this):
 # only `allowedTools`/`deniedTools` (an independent gate at every node on the
@@ -85,201 +96,24 @@ root:
   id: finops
   title: Financial operations
   description: >-
-    Root scope for regulated financial operations. Every step inherits this
-    ontology and this tool floor.
+    Root scope for regulated financial operations. Every step inherits this tool
+    floor; the object types themselves are declared per domain below.
   ontology:
-    # ---- Object types (properties are typed; exactly one primaryKey each) ----
-    entities:
-      - id: customer
-        title: Customer
-        description: A natural or legal person holding a relationship with the firm.
-        properties:
-          - { id: customer-id, type: id, primaryKey: true, required: true }
-          - { id: legal-name, type: string, required: true }
-          - { id: jurisdiction, type: string, required: true }
-          - { id: risk-rating, type: string, description: low | medium | high }
-          - { id: onboarded-at, type: date }
-      - id: account
-        title: Account
-        description: A deposit, credit, or investment account owned by a customer.
-        properties:
-          - { id: account-id, type: id, primaryKey: true, required: true }
-          - { id: product-type, type: string, required: true }
-          - { id: balance, type: number }
-          - { id: status, type: string, description: open | frozen | closed }
-      - id: transaction
-        title: Transaction
-        description: A single money movement booked against an account.
-        properties:
-          - { id: transaction-id, type: id, primaryKey: true, required: true }
-          - { id: amount, type: number, required: true }
-          - { id: currency, type: string, required: true }
-          - { id: counterparty, type: string }
-          - { id: booked-at, type: date, required: true }
-      - id: alert
-        title: Alert
-        description: A monitoring rule or model firing on suspicious activity.
-        properties:
-          - { id: alert-id, type: id, primaryKey: true, required: true }
-          - { id: typology, type: string, description: structuring | layering | sanctions | fraud }
-          - { id: score, type: number }
-          - { id: status, type: string, description: open | escalated | dismissed }
-      - id: investigation-case
-        title: Investigation case
-        description: A financial-crime case opened from one or more alerts.
-        properties:
-          - { id: case-id, type: id, primaryKey: true, required: true }
-          - { id: disposition, type: string, description: pending | closed-no-action | escalated }
-          - { id: opened-at, type: date }
-      - id: sar
-        title: Suspicious activity report
-        description: The regulatory filing produced when a case is escalated.
-        properties:
-          - { id: sar-id, type: id, primaryKey: true, required: true }
-          - { id: filed-at, type: date }
-          - { id: regulator, type: string }
-      - id: policy
-        title: Policy
-        description: An insurance or credit policy the customer holds.
-        properties:
-          - { id: policy-id, type: id, primaryKey: true, required: true }
-          - { id: coverage-limit, type: number, required: true }
-          - { id: effective-from, type: date }
-          - { id: effective-to, type: date }
-      - id: claim
-        title: Claim
-        description: A customer's demand against a policy.
-        properties:
-          - { id: claim-id, type: id, primaryKey: true, required: true }
-          - { id: claimed-amount, type: number, required: true }
-          - { id: status, type: string, description: intake | adjudicating | approved | denied | settled }
-          - { id: fraud-score, type: number }
-      - id: payment
-        title: Payment
-        description: An outbound settlement of an approved claim.
-        properties:
-          - { id: payment-id, type: id, primaryKey: true, required: true }
-          - { id: amount, type: number, required: true }
-          - { id: settled-at, type: date }
-      - id: document
-        title: Document
-        description: Evidence supplied by a customer or produced by an investigation.
-        properties:
-          - { id: document-id, type: id, primaryKey: true, required: true }
-          - { id: kind, type: string, description: id-proof | invoice | photo | statement }
-          - { id: verified, type: boolean }
-      - id: credit-report
-        title: Credit report
-        description: A bureau report pulled during underwriting.
-        properties:
-          - { id: report-id, type: id, primaryKey: true, required: true }
-          - { id: bureau, type: string, required: true }
-          - { id: score, type: number }
-      - id: regulatory-report
-        title: Regulatory report
-        description: A periodic filing submitted to a supervisor.
-        properties:
-          - { id: report-id, type: id, primaryKey: true, required: true }
-          - { id: period, type: string, required: true }
-          - { id: submitted, type: boolean }
-
-    # ---- Link types (cardinality is part of the contract) ----
-    relationships:
-      - id: customer-holds-account
-        from: customer
-        to: account
-        cardinality: one-to-many
-        inverse: account-owned-by
-        description: A customer holds many accounts; an account has one owner.
-      - id: account-books-transaction
-        from: account
-        to: transaction
-        cardinality: one-to-many
-        inverse: transaction-booked-on
-      - id: alert-flags-transaction
-        from: alert
-        to: transaction
-        cardinality: many-to-many
-        inverse: transaction-flagged-by
-        description: One alert can span several transactions and vice versa.
-      - id: case-investigates-alert
-        from: investigation-case
-        to: alert
-        cardinality: one-to-many
-        inverse: alert-escalated-into
-      - id: case-files-sar
-        from: investigation-case
-        to: sar
-        cardinality: one-to-one
-        inverse: sar-filed-from
-      - id: customer-holds-policy
-        from: customer
-        to: policy
-        cardinality: one-to-many
-        inverse: policy-held-by
-      - id: claim-against-policy
-        from: claim
-        to: policy
-        cardinality: many-to-one
-        inverse: policy-covers-claim
-      - id: payment-settles-claim
-        from: payment
-        to: claim
-        cardinality: one-to-one
-        inverse: claim-settled-by
-      - id: claim-evidenced-by-document
-        from: claim
-        to: document
-        cardinality: one-to-many
-        inverse: document-supports-claim
-      - id: customer-evidenced-by-document
-        from: customer
-        to: document
-        cardinality: one-to-many
-        inverse: document-identifies-customer
-      - id: customer-assessed-by-credit-report
-        from: customer
-        to: credit-report
-        cardinality: one-to-many
-        inverse: credit-report-assesses-customer
-      - id: regulatory-report-covers-sar
-        from: regulatory-report
-        to: sar
-        cardinality: one-to-many
-        inverse: sar-included-in
-
-    # ---- Derived values (read-only counterpart to actions) ----
-    # An expression is NOT JavaScript: it is evaluated by a closed, total op set
-    # (see src/enterprise/ontology-expression.ts), because a tree is imported data
-    # and evaluating it as code would make "import a tree" mean "run arbitrary
-    # code". Properties are referenced with a `$` sigil, since ontology ids are
-    # hyphenated and a bare `claimed-amount` would lex as subtraction.
+    # ---- Where the ontology lives -------------------------------------
+    # Object and link types are declared by the DOMAIN that operates on them,
+    # not here. A node only sees the types on its own root->node path
+    # (collectNodeOntologyGraph mirrors how governance merges that path), so a
+    # type declared at the root is addressable from all 40 steps and scoping
+    # stops meaning anything. Declaring them per domain is what makes claims
+    # unable to touch `sar`, and risk unable to touch `payment`.
     #
-    # These parse and resolve their `$` refs at IMPORT: a typo fails the import
-    # with a path rather than surfacing as a dud value midway through a run.
-    functions:
-      - id: claim-triage-band
-        title: Claim triage band
-        description: Which lane a claim should be worked in, from its own fields.
-        entity: claim
-        expression: "$fraud-score >= 80 ? 'refer' : ($claimed-amount > 10000 ? 'review' : 'auto')"
-        returns: string
-      - id: alert-is-high-risk
-        title: Alert is high risk
-        description: Whether a monitoring alert clears the escalation threshold.
-        entity: alert
-        expression: "$score >= 75"
-        returns: boolean
-      # A function reads only its OWN object type's properties, so a value that
-      # depends on another object (say, capping this at the policy's
-      # coverage-limit) is NOT expressible here — that needs a link traversal.
-      # Do not describe a function as doing something its expression cannot do.
-      - id: claim-amount-or-zero
-        title: Claim amount, or zero
-        description: The claimed amount, treating an unset amount as zero.
-        entity: claim
-        expression: "coalesce($claimed-amount, 0)"
-        returns: number
+    # A type used by two domains is RE-DECLARED in each, which the schema
+    # allows as long as the property types agree. Re-declaring a narrower set
+    # is deliberate: reporting sees `claim` without `fraud-score`, because it
+    # reports on claims rather than adjudicating them.
+    #
+    # Only the seeded INSTANCES below stay at the root: objects are stored once
+    # per tree, so their home does not follow the per-node type scope.
 
     # ---- Seeded object INSTANCES ----
     # The tree declares the objects a step works on, and they are materialized into
@@ -358,6 +192,61 @@ root:
     - id: finops.customer
       title: Customer lifecycle
       description: Onboarding a customer and servicing the relationship afterwards.
+      ontology:
+        # Customer lifecycle owns the party + its evidence. It never sees
+        # `claim`, `alert`, or `sar`: those belong to sibling domains.
+        entities:
+          - id: customer
+            title: Customer
+            description: A natural or legal person holding a relationship with the firm.
+            properties:
+              - { id: customer-id, type: id, primaryKey: true, required: true }
+              - { id: legal-name, type: string, required: true }
+              - { id: jurisdiction, type: string, required: true }
+              - { id: risk-rating, type: string, description: low | medium | high }
+              - { id: onboarded-at, type: date }
+          - id: account
+            title: Account
+            description: A deposit, credit, or investment account owned by a customer.
+            properties:
+              - { id: account-id, type: id, primaryKey: true, required: true }
+              - { id: product-type, type: string, required: true }
+              - { id: balance, type: number }
+              - { id: status, type: string, description: open | frozen | closed }
+          - id: document
+            title: Document
+            description: Evidence supplied by a customer or produced by an investigation.
+            properties:
+              - { id: document-id, type: id, primaryKey: true, required: true }
+              - { id: kind, type: string, description: id-proof | invoice | photo | statement }
+              - { id: verified, type: boolean }
+          # Servicing raises disputes against booked transactions, so it reads
+          # the type without owning the monitoring view risk declares.
+          - id: transaction
+            title: Transaction
+            description: A single money movement booked against an account.
+            properties:
+              - { id: transaction-id, type: id, primaryKey: true, required: true }
+              - { id: amount, type: number, required: true }
+              - { id: currency, type: string, required: true }
+              - { id: booked-at, type: date, required: true }
+        relationships:
+          - id: customer-holds-account
+            from: customer
+            to: account
+            cardinality: one-to-many
+            inverse: account-owned-by
+            description: A customer holds many accounts; an account has one owner.
+          - id: account-books-transaction
+            from: account
+            to: transaction
+            cardinality: one-to-many
+            inverse: transaction-booked-on
+          - id: customer-evidenced-by-document
+            from: customer
+            to: document
+            cardinality: one-to-many
+            inverse: document-identifies-customer
       children:
         - id: finops.customer.onboarding
           title: Customer onboarding
@@ -545,12 +434,101 @@ root:
     - id: finops.risk
       title: Risk
       description: Financial-crime monitoring and credit underwriting.
+      ontology:
+        # Only the party types both halves of risk share. The AML chain sits on
+        # monitoring and the bureau data on underwriting, so neither sibling can
+        # address the other's types even though they share this domain.
+        entities:
+          - id: customer
+            title: Customer
+            properties:
+              - { id: customer-id, type: id, primaryKey: true, required: true }
+              - { id: legal-name, type: string, required: true }
+              - { id: jurisdiction, type: string, required: true }
+              - { id: risk-rating, type: string, description: low | medium | high }
+          - id: account
+            title: Account
+            properties:
+              - { id: account-id, type: id, primaryKey: true, required: true }
+              - { id: product-type, type: string, required: true }
+              - { id: balance, type: number }
+              - { id: status, type: string, description: open | frozen | closed }
+        relationships:
+          - id: customer-holds-account
+            from: customer
+            to: account
+            cardinality: one-to-many
+            inverse: account-owned-by
       children:
         - id: finops.risk.monitoring
           title: Transaction monitoring
           description: >-
             Anti-money-laundering surveillance over booked transactions: triage
             alerts, investigate what survives, file a SAR when warranted.
+          ontology:
+            # The alert -> case -> SAR chain is monitoring's alone. Underwriting
+            # is one node over and cannot address any of it.
+            entities:
+              - id: transaction
+                title: Transaction
+                description: A single money movement booked against an account.
+                properties:
+                  - { id: transaction-id, type: id, primaryKey: true, required: true }
+                  - { id: amount, type: number, required: true }
+                  - { id: currency, type: string, required: true }
+                  - { id: counterparty, type: string }
+                  - { id: booked-at, type: date, required: true }
+              - id: alert
+                title: Alert
+                description: A monitoring rule or model firing on suspicious activity.
+                properties:
+                  - { id: alert-id, type: id, primaryKey: true, required: true }
+                  - { id: typology, type: string, description: structuring | layering | sanctions | fraud }
+                  - { id: score, type: number }
+                  - { id: status, type: string, description: open | escalated | dismissed }
+              - id: investigation-case
+                title: Investigation case
+                description: A financial-crime case opened from one or more alerts.
+                properties:
+                  - { id: case-id, type: id, primaryKey: true, required: true }
+                  - { id: disposition, type: string, description: pending | closed-no-action | escalated }
+                  - { id: opened-at, type: date }
+              - id: sar
+                title: Suspicious activity report
+                description: The regulatory filing produced when a case is escalated.
+                properties:
+                  - { id: sar-id, type: id, primaryKey: true, required: true }
+                  - { id: filed-at, type: date }
+                  - { id: regulator, type: string }
+            relationships:
+              - id: account-books-transaction
+                from: account
+                to: transaction
+                cardinality: one-to-many
+                inverse: transaction-booked-on
+              - id: alert-flags-transaction
+                from: alert
+                to: transaction
+                cardinality: many-to-many
+                inverse: transaction-flagged-by
+                description: One alert can span several transactions and vice versa.
+              - id: case-investigates-alert
+                from: investigation-case
+                to: alert
+                cardinality: one-to-many
+                inverse: alert-escalated-into
+              - id: case-files-sar
+                from: investigation-case
+                to: sar
+                cardinality: one-to-one
+                inverse: sar-filed-from
+            functions:
+              - id: alert-is-high-risk
+                title: Alert is high risk
+                description: Whether a monitoring alert clears the escalation threshold.
+                entity: alert
+                expression: "$score >= 75"
+                returns: boolean
           children:
             - id: finops.risk.monitoring.alert-triage
               title: Alert triage
@@ -651,6 +629,23 @@ root:
         - id: finops.risk.underwriting
           title: Credit underwriting
           description: Decide whether to extend credit, and on what terms.
+          ontology:
+            # Bureau data is underwriting-only: monitoring sits in the same
+            # domain but cannot address `credit-report` from its own path.
+            entities:
+              - id: credit-report
+                title: Credit report
+                description: A bureau report pulled during underwriting.
+                properties:
+                  - { id: report-id, type: id, primaryKey: true, required: true }
+                  - { id: bureau, type: string, required: true }
+                  - { id: score, type: number }
+            relationships:
+              - id: customer-assessed-by-credit-report
+                from: customer
+                to: credit-report
+                cardinality: one-to-many
+                inverse: credit-report-assesses-customer
           children:
             - id: finops.risk.underwriting.data-pull
               title: Bureau data pull
@@ -721,6 +716,83 @@ root:
     - id: finops.claims
       title: Claims
       description: Handling a claim against a policy, end to end.
+      ontology:
+        # Claims handling. Holds the policy/claim/evidence types; `payment`
+        # lives one level down on settlement, so intake and adjudication
+        # cannot move money even though they share this domain.
+        entities:
+          - id: policy
+            title: Policy
+            description: An insurance or credit policy the customer holds.
+            properties:
+              - { id: policy-id, type: id, primaryKey: true, required: true }
+              - { id: coverage-limit, type: number, required: true }
+              - { id: effective-from, type: date }
+              - { id: effective-to, type: date }
+          - id: claim
+            title: Claim
+            description: A customer's demand against a policy.
+            properties:
+              - { id: claim-id, type: id, primaryKey: true, required: true }
+              - { id: claimed-amount, type: number, required: true }
+              - { id: status, type: string, description: intake | adjudicating | approved | denied | settled }
+              - { id: fraud-score, type: number }
+          - id: document
+            title: Document
+            properties:
+              - { id: document-id, type: id, primaryKey: true, required: true }
+              - { id: kind, type: string, description: id-proof | invoice | photo | statement }
+              - { id: verified, type: boolean }
+          # The policyholder, as claims needs them: enough to name the party on
+          # a claim, without the risk-rating that customer/risk work with.
+          - id: customer
+            title: Customer
+            properties:
+              - { id: customer-id, type: id, primaryKey: true, required: true }
+              - { id: legal-name, type: string, required: true }
+        relationships:
+          - id: customer-holds-policy
+            from: customer
+            to: policy
+            cardinality: one-to-many
+            inverse: policy-held-by
+          - id: claim-against-policy
+            from: claim
+            to: policy
+            cardinality: many-to-one
+            inverse: policy-covers-claim
+          - id: claim-evidenced-by-document
+            from: claim
+            to: document
+            cardinality: one-to-many
+            inverse: document-supports-claim
+        functions:
+          # An expression is NOT JavaScript: it is evaluated by a closed, total
+          # op set (see src/enterprise/ontology-expression.ts), because a tree
+          # is imported data and evaluating it as code would make "import a
+          # tree" mean "run arbitrary code". Properties are referenced with a
+          # `$` sigil, since ontology ids are hyphenated and a bare
+          # `claimed-amount` would lex as subtraction.
+          #
+          # These parse and resolve their `$` refs at IMPORT: a typo fails the
+          # import with a path rather than surfacing as a dud value mid-run.
+          - id: claim-triage-band
+            title: Claim triage band
+            description: Which lane a claim should be worked in, from its own fields.
+            entity: claim
+            expression: "$fraud-score >= 80 ? 'refer' : ($claimed-amount > 10000 ? 'review' : 'auto')"
+            returns: string
+          # A function reads only its OWN object type's properties, so a value
+          # that depends on another object (say, capping this at the policy's
+          # coverage-limit) is NOT expressible here - that needs a link
+          # traversal. Do not describe a function as doing something its
+          # expression cannot do.
+          - id: claim-amount-or-zero
+            title: Claim amount, or zero
+            description: The claimed amount, treating an unset amount as zero.
+            entity: claim
+            expression: "coalesce($claimed-amount, 0)"
+            returns: number
       children:
         - id: finops.claims.intake
           title: Claim intake
@@ -860,6 +932,24 @@ root:
         - id: finops.claims.settlement
           title: Claim settlement
           description: Move money on an approved claim, and recover where possible.
+          ontology:
+            # Money movement is scoped to settlement alone: no other step on
+            # this tree has `payment` on its path, so no other step can create
+            # one however it is prompted.
+            entities:
+              - id: payment
+                title: Payment
+                description: An outbound settlement of an approved claim.
+                properties:
+                  - { id: payment-id, type: id, primaryKey: true, required: true }
+                  - { id: amount, type: number, required: true }
+                  - { id: settled-at, type: date }
+            relationships:
+              - id: payment-settles-claim
+                from: payment
+                to: claim
+                cardinality: one-to-one
+                inverse: claim-settled-by
           children:
             - id: finops.claims.settlement.payment
               title: Issue claim payment
@@ -910,6 +1000,55 @@ root:
     - id: finops.reporting
       title: Reporting
       description: Periodic supervisory reporting, management reporting, and audit.
+      ontology:
+        # Reporting reads what the other domains produced. Every type here is a
+        # NARROWER re-declaration: it reports on claims and alerts, so it gets
+        # their identity and status but not the adjudication/scoring fields.
+        entities:
+          - id: regulatory-report
+            title: Regulatory report
+            description: A periodic filing submitted to a supervisor.
+            properties:
+              - { id: report-id, type: id, primaryKey: true, required: true }
+              - { id: period, type: string, required: true }
+              - { id: submitted, type: boolean }
+          - id: sar
+            title: Suspicious activity report
+            properties:
+              - { id: sar-id, type: id, primaryKey: true, required: true }
+              - { id: filed-at, type: date }
+              - { id: regulator, type: string }
+          - id: investigation-case
+            title: Investigation case
+            properties:
+              - { id: case-id, type: id, primaryKey: true, required: true }
+              - { id: disposition, type: string, description: pending | closed-no-action | escalated }
+          # No `fraud-score`: adjudication owns that judgement, reporting only
+          # counts and states claims.
+          - id: claim
+            title: Claim
+            properties:
+              - { id: claim-id, type: id, primaryKey: true, required: true }
+              - { id: claimed-amount, type: number, required: true }
+              - { id: status, type: string, description: intake | adjudicating | approved | denied | settled }
+          # No `score`: management reporting bands alerts by typology/status.
+          - id: alert
+            title: Alert
+            properties:
+              - { id: alert-id, type: id, primaryKey: true, required: true }
+              - { id: typology, type: string, description: structuring | layering | sanctions | fraud }
+              - { id: status, type: string, description: open | escalated | dismissed }
+        relationships:
+          - id: regulatory-report-covers-sar
+            from: regulatory-report
+            to: sar
+            cardinality: one-to-many
+            inverse: sar-included-in
+          - id: case-files-sar
+            from: investigation-case
+            to: sar
+            cardinality: one-to-one
+            inverse: sar-filed-from
       children:
         - id: finops.reporting.regulatory
           title: Regulatory reporting
