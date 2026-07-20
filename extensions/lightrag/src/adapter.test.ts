@@ -256,6 +256,36 @@ describe("LightRagKnowledgeFoundation documents", () => {
     });
   });
 
+  it("omits fields a still-indexing document reports as null", async () => {
+    // Verbatim shape from a live LightRAG server right after upload. Carrying
+    // the nulls through would render "null chunk(s)" in the inspector and break
+    // the optional-number contract these fields declare.
+    const { fetchImpl } = mockFetch({
+      statuses: {
+        pending: [
+          {
+            id: "doc-9073fc83",
+            file_path: "notes.txt",
+            content_summary: "",
+            content_length: 0,
+            chunks_count: null,
+            error_msg: null,
+            updated_at: "2026-07-20T05:21:53.409222+00:00",
+          },
+        ],
+      },
+    });
+    const adapter = buildAdapter({ fetchImpl });
+
+    const [document] = await adapter.listDocuments();
+
+    expect(document).not.toHaveProperty("chunkCount");
+    expect(document).not.toHaveProperty("error");
+    // An empty summary is "no preview available", not a blank preview.
+    expect(document).not.toHaveProperty("summary");
+    expect(document).toMatchObject({ id: "doc-9073fc83", status: "pending", contentLength: 0 });
+  });
+
   it("maps an unrecognized pipeline state to unknown rather than dropping the row", async () => {
     // LightRAG can add states faster than this adapter tracks them.
     const { fetchImpl } = mockFetch({

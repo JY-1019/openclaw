@@ -89,15 +89,20 @@ const DOCUMENT_STATUS_BY_LIGHTRAG_STATE: Record<string, KnowledgeDocumentStatus>
   failed: "failed",
 };
 
-/** One `statuses[<state>][]` entry in a LightRAG `GET /documents` response. */
+/**
+ * One `statuses[<state>][]` entry in a LightRAG `GET /documents` response.
+ * The nullables are not defensive typing: a freshly uploaded document really is
+ * served as `{"chunks_count": null, "error_msg": null, "content_summary": ""}`
+ * until indexing fills them in.
+ */
 type LightRagDocument = {
   id?: string;
   file_path?: string;
-  content_summary?: string;
-  content_length?: number;
-  chunks_count?: number;
-  error_msg?: string;
-  updated_at?: string;
+  content_summary?: string | null;
+  content_length?: number | null;
+  chunks_count?: number | null;
+  error_msg?: string | null;
+  updated_at?: string | null;
 };
 
 type LightRagDocumentsResponse = {
@@ -299,19 +304,23 @@ function mapDocument(entry: LightRagDocument, state: string): KnowledgeFoundatio
     name: entry.file_path ?? (entry.id as string),
     status: DOCUMENT_STATUS_BY_LIGHTRAG_STATE[state.toLowerCase()] ?? "unknown",
   };
-  if (entry.content_summary !== undefined) {
+  // Compare against null, not undefined: a document still being indexed comes
+  // back with explicit `"chunks_count": null` / `"error_msg": null`, and
+  // carrying those through would put a literal "null" on the operator's screen
+  // and break the optional-number contract these fields declare.
+  if (entry.content_summary) {
     document.summary = entry.content_summary;
   }
-  if (entry.content_length !== undefined) {
+  if (entry.content_length != null) {
     document.contentLength = entry.content_length;
   }
-  if (entry.chunks_count !== undefined) {
+  if (entry.chunks_count != null) {
     document.chunkCount = entry.chunks_count;
   }
-  if (entry.error_msg !== undefined) {
+  if (entry.error_msg != null) {
     document.error = entry.error_msg;
   }
-  if (entry.updated_at !== undefined) {
+  if (entry.updated_at != null) {
     document.updatedAt = entry.updated_at;
   }
   return document;
