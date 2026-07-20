@@ -305,6 +305,64 @@ describe("renderKnowledge files section", () => {
     expect(findButton(container, "Remove")).toBeUndefined();
   });
 
+  it("offers upload for a ready, admin-managed local foundation", () => {
+    // Guards the negative cases below from over-correcting into "never shown".
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: { "acme.kb": { phase: "ready", documents: [] } },
+      }),
+    );
+    expect(container.textContent).toContain("Upload document");
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(input?.disabled).toBe(false);
+  });
+
+  it("blocks upload while another foundation's upload is in flight", () => {
+    // Uploads are serialized tab-wide, so an enabled-looking control on a
+    // second foundation would silently no-op when picked.
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: { "acme.kb": { phase: "ready", documents: [] } },
+        uploadingFor: "other.kb",
+      }),
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    expect(input?.disabled).toBe(true);
+    // The busy label belongs to the foundation actually uploading.
+    expect(container.textContent).not.toContain("Uploading");
+  });
+
+  it("hides upload until the document list has answered", () => {
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: { "acme.kb": { phase: "loading" } },
+      }),
+    );
+    expect(container.textContent).not.toContain("Upload document");
+  });
+
+  it("hides upload when the store reports it cannot manage documents", () => {
+    // Offering upload here would hand the user a control whose only outcome is
+    // a refusal from the gateway.
+    for (const status of ["unsupported", "not-registered", "failed"] as const) {
+      const container = renderInto(
+        buildProps({
+          foundations: [local()],
+          filesOpenFor: "acme.kb",
+          documents: { "acme.kb": { phase: "unavailable", status } },
+        }),
+      );
+      expect(container.textContent).not.toContain("Upload document");
+    }
+  });
+
   it("asks for confirmation before removing rather than deleting on click", () => {
     const onRequestRemove = vi.fn();
     const container = renderInto(

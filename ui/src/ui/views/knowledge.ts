@@ -130,17 +130,25 @@ function renderFiles(foundation: EnterpriseKnowledgeFoundationSummary, props: Kn
 
 function renderFilesPanel(foundation: EnterpriseKnowledgeFoundationSummary, props: KnowledgeProps) {
   const state = props.documents[foundation.id];
-  const uploading = props.uploadingFor === foundation.id;
+  const uploadingThis = props.uploadingFor === foundation.id;
+  // Uploads are serialized across the whole tab, so a request for a different
+  // foundation still blocks this one. Disabling only the in-flight foundation's
+  // control would leave the others looking usable while a pick silently no-ops.
+  const uploadBlocked = props.uploadingFor !== null;
+  // Only offer upload once the list has actually answered. While it is loading
+  // we do not yet know the store accepts documents, and an "unsupported" or
+  // "not-registered" answer means a pick would just come back refused.
+  const canUpload = props.canManageFiles && state?.phase === "ready";
   return html`<div style="margin-top: 8px;">
     <div class="row" style="justify-content: space-between; align-items: center;">
       <div class="card-sub">${t("knowledge.files")}</div>
-      ${props.canManageFiles
-        ? html`<label class="btn" style=${uploading ? "opacity: 0.6;" : nothing}>
-            ${uploading ? t("knowledge.uploading") : t("knowledge.upload")}
+      ${canUpload
+        ? html`<label class="btn" style=${uploadBlocked ? "opacity: 0.6;" : nothing}>
+            ${uploadingThis ? t("knowledge.uploading") : t("knowledge.upload")}
             <input
               type="file"
               style="display: none;"
-              ?disabled=${uploading}
+              ?disabled=${uploadBlocked}
               @change=${(event: Event) => {
                 const input = event.target as HTMLInputElement;
                 const file = input.files?.[0];
