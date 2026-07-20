@@ -10,8 +10,20 @@ function buildProps(overrides?: Partial<KnowledgeProps>): KnowledgeProps {
     foundations: [],
     connections: {},
     error: null,
+    canManageFiles: true,
+    filesOpenFor: null,
+    documents: {},
+    uploadingFor: null,
+    documentConfirm: null,
+    documentNotice: null,
     onRefresh: vi.fn(),
     onTestConnection: vi.fn(),
+    onOpenFiles: vi.fn(),
+    onCloseFiles: vi.fn(),
+    onUpload: vi.fn(),
+    onRequestRemove: vi.fn(),
+    onCancelRemove: vi.fn(),
+    onConfirmRemove: vi.fn(),
   };
   return { ...props, ...overrides };
 }
@@ -161,5 +173,183 @@ describe("renderKnowledge", () => {
   it("surfaces a tab-level error", () => {
     const container = renderInto(buildProps({ error: "boom" }));
     expect(container.querySelector(".callout.danger")?.textContent).toContain("boom");
+  });
+});
+
+describe("renderKnowledge files section", () => {
+  const local = (overrides: Record<string, unknown> = {}) =>
+    foundation({ kind: "local", ...overrides });
+
+  function findButton(container: HTMLElement, text: string) {
+    return [...container.querySelectorAll("button")].find((candidate) =>
+      candidate.textContent?.includes(text),
+    );
+  }
+
+  it("offers files only for a foundation this deployment administers", () => {
+    // A remote foundation is read-only by contract, so the control would be a
+    // dead affordance that fails on click.
+    const remote = renderInto(buildProps({ foundations: [foundation({ kind: "remote" })] }));
+    expect(findButton(remote, "Show files")).toBeUndefined();
+
+    const localised = renderInto(buildProps({ foundations: [local()] }));
+    expect(findButton(localised, "Show files")).toBeDefined();
+  });
+
+  it("opens the files section with the foundation id", () => {
+    const onOpenFiles = vi.fn();
+    const container = renderInto(buildProps({ foundations: [local()], onOpenFiles }));
+    findButton(container, "Show files")?.click();
+    expect(onOpenFiles).toHaveBeenCalledWith("acme.kb");
+  });
+
+  it("does not claim there are no documents while the list is loading", () => {
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: { "acme.kb": { phase: "loading" } },
+      }),
+    );
+    expect(container.textContent).not.toContain("No documents have been uploaded yet");
+  });
+
+  it("renders documents with status, chunk count, and summary", () => {
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: {
+          "acme.kb": {
+            phase: "ready",
+            documents: [
+              {
+                id: "d1",
+                name: "handbook.pdf",
+                status: "indexed",
+                summary: "Company handbook",
+                chunkCount: 12,
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(container.textContent).toContain("handbook.pdf");
+    expect(container.textContent).toContain("Indexed");
+    expect(container.textContent).toContain("12 chunk(s)");
+    expect(container.textContent).toContain("Company handbook");
+  });
+
+  it("explains that a store exposes no preview instead of rendering blank", () => {
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: {
+          "acme.kb": { phase: "ready", documents: [{ id: "d1", name: "a.md", status: "indexed" }] },
+        },
+      }),
+    );
+    expect(container.textContent).toContain("exposes no preview");
+  });
+
+  it("shows a failed document's indexing error", () => {
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: {
+          "acme.kb": {
+            phase: "ready",
+            documents: [{ id: "d1", name: "bad.md", status: "failed", error: "parse error" }],
+          },
+        },
+      }),
+    );
+    expect(container.textContent).toContain("Failed");
+    expect(container.textContent).toContain("parse error");
+  });
+
+  it("explains each unavailable reason distinctly", () => {
+    const cases = [
+      { status: "read-only", text: "operated elsewhere" },
+      { status: "unsupported", text: "does not expose document management" },
+      { status: "not-registered", text: "no longer registered" },
+      { status: "failed", text: "Could not load documents" },
+    ] as const;
+    for (const { status, text } of cases) {
+      const container = renderInto(
+        buildProps({
+          foundations: [local()],
+          filesOpenFor: "acme.kb",
+          documents: { "acme.kb": { phase: "unavailable", status } },
+        }),
+      );
+      expect(container.textContent).toContain(text);
+    }
+  });
+
+  it("hides upload and remove controls without admin scope", () => {
+    const container = renderInto(
+      buildProps({
+        canManageFiles: false,
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: {
+          "acme.kb": { phase: "ready", documents: [{ id: "d1", name: "a.md", status: "indexed" }] },
+        },
+      }),
+    );
+    expect(container.textContent).not.toContain("Upload document");
+    expect(findButton(container, "Remove")).toBeUndefined();
+  });
+
+  it("asks for confirmation before removing rather than deleting on click", () => {
+    const onRequestRemove = vi.fn();
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: {
+          "acme.kb": { phase: "ready", documents: [{ id: "d1", name: "a.md", status: "indexed" }] },
+        },
+        onRequestRemove,
+      }),
+    );
+    findButton(container, "Remove")?.click();
+    expect(onRequestRemove).toHaveBeenCalledWith({
+      foundationId: "acme.kb",
+      documentId: "d1",
+      documentName: "a.md",
+    });
+  });
+
+  it("warns that removal is irreversible in the confirm dialog", () => {
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        documentConfirm: {
+          foundationId: "acme.kb",
+          documentId: "d1",
+          documentName: "handbook.pdf",
+        },
+      }),
+    );
+    expect(container.querySelector("openclaw-modal-dialog")).not.toBeNull();
+    expect(container.textContent).toContain("Remove handbook.pdf?");
+    expect(container.textContent).toContain("cannot be undone");
+  });
+
+  it("surfaces the last file-action notice", () => {
+    const container = renderInto(
+      buildProps({
+        foundations: [local()],
+        filesOpenFor: "acme.kb",
+        documents: { "acme.kb": { phase: "ready", documents: [] } },
+        documentNotice: "Removal of a.md started. It runs in the background.",
+      }),
+    );
+    expect(container.textContent).toContain("started");
   });
 });

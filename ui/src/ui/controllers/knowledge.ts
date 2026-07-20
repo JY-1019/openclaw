@@ -1,10 +1,16 @@
 // Control UI controller manages the knowledge foundations gateway state.
-import type {
-  EnterpriseKnowledgeConnectionStatus,
-  EnterpriseKnowledgeFoundationsListResult,
-  EnterpriseKnowledgeFoundationsTestConnectionResult,
-  EnterpriseKnowledgeFoundationSummary,
+import {
+  ENTERPRISE_KNOWLEDGE_DOCUMENT_MAX_BYTES,
+  type EnterpriseKnowledgeConnectionStatus,
+  type EnterpriseKnowledgeDocument,
+  type EnterpriseKnowledgeDocumentsListResult,
+  type EnterpriseKnowledgeDocumentsRemoveResult,
+  type EnterpriseKnowledgeDocumentsUploadResult,
+  type EnterpriseKnowledgeFoundationsListResult,
+  type EnterpriseKnowledgeFoundationsTestConnectionResult,
+  type EnterpriseKnowledgeFoundationSummary,
 } from "../../../../packages/gateway-protocol/src/index.js";
+import { t } from "../../i18n/index.ts";
 import type { GatewayBrowserClient } from "../gateway.ts";
 import {
   formatMissingOperatorReadScopeMessage,
@@ -28,6 +34,23 @@ export type KnowledgeConnectionState =
  */
 export type KnowledgeListPhase = "unloaded" | "loading" | "ready" | "failed";
 
+/**
+ * Per-foundation file list state. Same reason the top-level list carries a
+ * phase: "no documents" is a claim about the gateway's answer, and an empty
+ * array before the answer arrives would assert it prematurely.
+ */
+export type KnowledgeDocumentsState =
+  | { phase: "loading" }
+  | { phase: "ready"; documents: EnterpriseKnowledgeDocument[] }
+  | { phase: "unavailable"; status: EnterpriseKnowledgeDocumentsListResult["status"] };
+
+/** A destructive file action awaiting operator confirmation. */
+export type KnowledgeDocumentConfirm = {
+  foundationId: string;
+  documentId: string;
+  documentName: string;
+};
+
 export type KnowledgeState = {
   client: GatewayBrowserClient | null;
   connected: boolean;
@@ -35,6 +58,14 @@ export type KnowledgeState = {
   knowledgeFoundations: EnterpriseKnowledgeFoundationSummary[];
   knowledgeConnections: Record<string, KnowledgeConnectionState>;
   knowledgeError: string | null;
+  /** Foundation whose Files section is open, or null when all are collapsed. */
+  knowledgeFilesOpenFor: string | null;
+  knowledgeDocuments: Record<string, KnowledgeDocumentsState>;
+  /** Foundation with an upload in flight; its controls stay disabled. */
+  knowledgeUploadingFor: string | null;
+  knowledgeDocumentConfirm: KnowledgeDocumentConfirm | null;
+  /** Last file-action message (upload rejected, removal started, ...). */
+  knowledgeDocumentNotice: string | null;
 };
 
 // Monotonic token so the latest list load wins. A "skip if already loading"
@@ -158,6 +189,221 @@ function forgetRemovedFoundations(
       latestTestSeqByFoundation.delete(foundationId);
     }
   }
+
+  // Same treatment for file state, plus the open section itself: leaving it
+  // open on a foundation that no longer exists would render a headless panel.
+  const retainedDocuments: Record<string, KnowledgeDocumentsState> = {};
+  for (const [foundationId, documents] of Object.entries(state.knowledgeDocuments)) {
+    if (live.has(foundationId)) {
+      retainedDocuments[foundationId] = documents;
+    }
+  }
+  state.knowledgeDocuments = retainedDocuments;
+  for (const foundationId of latestDocumentsSeqByFoundation.keys()) {
+    if (!live.has(foundationId)) {
+      latestDocumentsSeqByFoundation.delete(foundationId);
+    }
+  }
+  if (state.knowledgeFilesOpenFor && !live.has(state.knowledgeFilesOpenFor)) {
+    state.knowledgeFilesOpenFor = null;
+    state.knowledgeDocumentNotice = null;
+  }
+  if (state.knowledgeDocumentConfirm && !live.has(state.knowledgeDocumentConfirm.foundationId)) {
+    // Never leave a confirm dialog pointing at a foundation that vanished.
+    state.knowledgeDocumentConfirm = null;
+  }
+}
+
+// Document loads race the same way probes do: one token per foundation, with a
+// globally monotonic counter so no id can mistake an older seq for a newer one.
+let documentsRequestSeq = 0;
+const latestDocumentsSeqByFoundation = new Map<string, number>();
+
+/** Open one foundation's Files section (closing any other) and load it. */
+export async function openKnowledgeFiles(state: KnowledgeState, foundationId: string) {
+  state.knowledgeFilesOpenFor = foundationId;
+  state.knowledgeDocumentNotice = null;
+  await loadKnowledgeDocuments(state, foundationId);
+}
+
+export function closeKnowledgeFiles(state: KnowledgeState) {
+  state.knowledgeFilesOpenFor = null;
+  state.knowledgeDocumentNotice = null;
+}
+
+export async function loadKnowledgeDocuments(state: KnowledgeState, foundationId: string) {
+  if (!state.client || !state.connected) {
+    return;
+  }
+  const requestSeq = ++documentsRequestSeq;
+  latestDocumentsSeqByFoundation.set(foundationId, requestSeq);
+  setDocuments(state, foundationId, { phase: "loading" });
+  try {
+    const result = await state.client.request<EnterpriseKnowledgeDocumentsListResult>(
+      "enterprise.knowledge.documents.list",
+      { foundationId },
+    );
+    if (latestDocumentsSeqByFoundation.get(foundationId) !== requestSeq) {
+      return;
+    }
+    setDocuments(
+      state,
+      foundationId,
+      result.status === "ok"
+        ? { phase: "ready", documents: result.documents }
+        : { phase: "unavailable", status: result.status },
+    );
+  } catch (err) {
+    if (latestDocumentsSeqByFoundation.get(foundationId) !== requestSeq) {
+      return;
+    }
+    if (isMissingOperatorReadScopeError(err)) {
+      applyError(state, err);
+      return;
+    }
+    setDocuments(state, foundationId, { phase: "unavailable", status: "failed" });
+  } finally {
+    if (latestDocumentsSeqByFoundation.get(foundationId) === requestSeq) {
+      latestDocumentsSeqByFoundation.delete(foundationId);
+    }
+  }
+}
+
+export async function uploadKnowledgeDocument(
+  state: KnowledgeState,
+  foundationId: string,
+  file: File,
+) {
+  if (!state.client || !state.connected || state.knowledgeUploadingFor) {
+    return;
+  }
+  // Check the size here too, not only server-side: the alternative is base64
+  // encoding a file that is already known to be over the limit and shipping it
+  // across the socket just to be told no.
+  if (file.size > ENTERPRISE_KNOWLEDGE_DOCUMENT_MAX_BYTES) {
+    state.knowledgeDocumentNotice = t("knowledge.uploadTooLarge", {
+      limit: formatMegabytes(ENTERPRISE_KNOWLEDGE_DOCUMENT_MAX_BYTES),
+    });
+    return;
+  }
+  state.knowledgeUploadingFor = foundationId;
+  state.knowledgeDocumentNotice = null;
+  try {
+    const result = await state.client.request<EnterpriseKnowledgeDocumentsUploadResult>(
+      "enterprise.knowledge.documents.upload",
+      {
+        foundationId,
+        name: file.name,
+        contentBase64: toBase64(await file.arrayBuffer()),
+      },
+    );
+    state.knowledgeDocumentNotice = uploadNotice(result, file.name);
+    if (result.status === "accepted") {
+      // Indexing continues in the background, so the row appears as pending;
+      // reload to show it rather than leaving the list looking unchanged.
+      await loadKnowledgeDocuments(state, foundationId);
+    }
+  } catch (err) {
+    if (isMissingOperatorReadScopeError(err)) {
+      applyError(state, err);
+      return;
+    }
+    state.knowledgeDocumentNotice = String(err);
+  } finally {
+    state.knowledgeUploadingFor = null;
+  }
+}
+
+export function requestKnowledgeDocumentRemoval(
+  state: KnowledgeState,
+  confirm: KnowledgeDocumentConfirm,
+) {
+  state.knowledgeDocumentConfirm = confirm;
+}
+
+export function cancelKnowledgeDocumentRemoval(state: KnowledgeState) {
+  state.knowledgeDocumentConfirm = null;
+}
+
+export async function confirmKnowledgeDocumentRemoval(state: KnowledgeState) {
+  const confirm = state.knowledgeDocumentConfirm;
+  if (!confirm || !state.client || !state.connected) {
+    return;
+  }
+  state.knowledgeDocumentConfirm = null;
+  state.knowledgeDocumentNotice = null;
+  try {
+    const result = await state.client.request<EnterpriseKnowledgeDocumentsRemoveResult>(
+      "enterprise.knowledge.documents.remove",
+      { foundationId: confirm.foundationId, documentId: confirm.documentId },
+    );
+    state.knowledgeDocumentNotice = removalNotice(result, confirm.documentName);
+    // Reload even on "started": removal is a background job, so the row may
+    // still be listed. The notice, not the list, is what says it was accepted.
+    await loadKnowledgeDocuments(state, confirm.foundationId);
+  } catch (err) {
+    if (isMissingOperatorReadScopeError(err)) {
+      applyError(state, err);
+      return;
+    }
+    state.knowledgeDocumentNotice = String(err);
+  }
+}
+
+function uploadNotice(result: EnterpriseKnowledgeDocumentsUploadResult, fileName: string): string {
+  switch (result.status) {
+    case "accepted":
+      return t("knowledge.uploadAccepted", { name: fileName });
+    case "duplicate":
+      return t("knowledge.uploadDuplicate", { name: fileName });
+    case "too-large":
+      return t("knowledge.uploadTooLarge", {
+        limit: formatMegabytes(ENTERPRISE_KNOWLEDGE_DOCUMENT_MAX_BYTES),
+      });
+    case "read-only":
+      return t("knowledge.filesReadOnly");
+    default:
+      return t("knowledge.uploadFailed", { detail: result.detail ?? result.status });
+  }
+}
+
+function removalNotice(result: EnterpriseKnowledgeDocumentsRemoveResult, name: string): string {
+  switch (result.status) {
+    case "started":
+      // Deliberately "started": the store deletes in the background, and
+      // claiming it is gone would be a lie the next reload contradicts.
+      return t("knowledge.removeStarted", { name });
+    case "busy":
+      return t("knowledge.removeBusy");
+    case "read-only":
+      return t("knowledge.filesReadOnly");
+    default:
+      return t("knowledge.removeFailed", { detail: result.detail ?? result.status });
+  }
+}
+
+function formatMegabytes(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+function toBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  // Chunked: spreading a multi-megabyte array into String.fromCharCode at once
+  // overflows the call stack.
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + CHUNK));
+  }
+  return btoa(binary);
+}
+
+function setDocuments(
+  state: KnowledgeState,
+  foundationId: string,
+  documents: KnowledgeDocumentsState,
+) {
+  state.knowledgeDocuments = { ...state.knowledgeDocuments, [foundationId]: documents };
 }
 
 function applyError(state: KnowledgeState, err: unknown) {
@@ -166,10 +412,17 @@ function applyError(state: KnowledgeState, err: unknown) {
     // its own guard, then wipe the data this connection may no longer read.
     listRequestSeq++;
     testRequestSeq++;
+    documentsRequestSeq++;
     latestTestSeqByFoundation.clear();
+    latestDocumentsSeqByFoundation.clear();
     state.knowledgePhase = "failed";
     state.knowledgeFoundations = [];
     state.knowledgeConnections = {};
+    state.knowledgeDocuments = {};
+    state.knowledgeFilesOpenFor = null;
+    state.knowledgeUploadingFor = null;
+    state.knowledgeDocumentConfirm = null;
+    state.knowledgeDocumentNotice = null;
     state.knowledgeError = formatMissingOperatorReadScopeMessage("knowledge foundations");
     return;
   }

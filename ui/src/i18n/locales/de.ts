@@ -179,6 +179,38 @@ export const de: TranslationMap = {
     referencedByNone: "Von keinem Workflow-Schritt referenziert.",
     referencedByHint:
       "Schritte, deren Ontologie-Zulassungsliste diese Grundlage benennt. Bearbeiten Sie die Zulassungsliste im Enterprise-Tab.",
+    files: "Dateien",
+    filesShow: "Dateien anzeigen",
+    filesHide: "Dateien ausblenden",
+    filesEmpty: "Es wurden noch keine Dokumente hochgeladen.",
+    filesReadOnly:
+      "Diese Foundation wird anderswo betrieben, daher sind die Dokumente hier schreibgeschützt.",
+    filesUnsupported: "Dieser Adapter unterstützt keine Dokumentenverwaltung.",
+    filesNotRegistered: "Diese Foundation ist nicht mehr registriert. Aktualisieren Sie die Liste.",
+    filesFailed: "Dokumente konnten nicht geladen werden.",
+    upload: "Dokument hochladen",
+    uploading: "Wird hochgeladen…",
+    uploadAccepted: "{name} hochgeladen. Die Indexierung läuft im Hintergrund.",
+    uploadDuplicate:
+      "Ein Dokument mit dem Namen {name} existiert bereits. Entfernen Sie es vor dem erneuten Hochladen.",
+    uploadTooLarge: "Diese Datei überschreitet das Upload-Limit von {limit}.",
+    uploadFailed: "Hochladen fehlgeschlagen: {detail}",
+    remove: "Entfernen",
+    removeTitle: "{name} entfernen?",
+    removeBody:
+      "Dadurch werden das Dokument und alle daraus indexierten Daten gelöscht. Agenten können es nicht mehr abrufen. Dies kann nicht rückgängig gemacht werden.",
+    removeStarted: "Entfernung von {name} gestartet. Sie läuft im Hintergrund.",
+    removeBusy:
+      "Der Speicher ist mit der Indexierung beschäftigt. Versuchen Sie es in Kürze erneut.",
+    removeFailed: "Entfernung fehlgeschlagen: {detail}",
+    docStatusPending: "Ausstehend",
+    docStatusProcessing: "Indizierung",
+    docStatusIndexed: "Indiziert",
+    docStatusFailed: "Fehlgeschlagen",
+    docStatusUnknown: "Unbekannt",
+    docChunks: "{count} Chunk(s)",
+    docSummary: "Zusammenfassung",
+    docNoSummary: "Dieser Store bietet keine Vorschau für dieses Dokument.",
   },
   enterprise: {
     title: "Enterprise",

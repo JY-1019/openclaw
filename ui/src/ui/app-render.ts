@@ -142,8 +142,14 @@ import {
   updateExecApprovalsFormValue,
 } from "./controllers/exec-approvals.ts";
 import {
+  cancelKnowledgeDocumentRemoval,
+  closeKnowledgeFiles,
+  confirmKnowledgeDocumentRemoval,
   loadKnowledgeFoundations,
+  openKnowledgeFiles,
+  requestKnowledgeDocumentRemoval,
   testKnowledgeFoundationConnection,
+  uploadKnowledgeDocument,
 } from "./controllers/knowledge.ts";
 import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
@@ -2941,6 +2947,19 @@ export function renderApp(state: AppViewState) {
                 onRefresh: () => void loadKnowledgeFoundations(state),
                 onTestConnection: (foundationId) =>
                   void testKnowledgeFoundationConnection(state, foundationId),
+                canManageFiles: hasOperatorAdminAccess(state.hello?.auth ?? null),
+                filesOpenFor: state.knowledgeFilesOpenFor,
+                documents: state.knowledgeDocuments,
+                uploadingFor: state.knowledgeUploadingFor,
+                documentConfirm: state.knowledgeDocumentConfirm,
+                documentNotice: state.knowledgeDocumentNotice,
+                onOpenFiles: (foundationId) => void openKnowledgeFiles(state, foundationId),
+                onCloseFiles: () => closeKnowledgeFiles(state),
+                onUpload: (foundationId, file) =>
+                  void uploadKnowledgeDocument(state, foundationId, file),
+                onRequestRemove: (confirm) => requestKnowledgeDocumentRemoval(state, confirm),
+                onCancelRemove: () => cancelKnowledgeDocumentRemoval(state),
+                onConfirmRemove: () => void confirmKnowledgeDocumentRemoval(state),
               }),
             )
           : nothing}

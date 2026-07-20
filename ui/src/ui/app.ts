@@ -527,6 +527,16 @@ export class OpenClawApp extends LitElement {
     import("./controllers/knowledge.js").KnowledgeConnectionState
   > = {};
   @state() knowledgeError: string | null = null;
+  @state() knowledgeFilesOpenFor: string | null = null;
+  @state() knowledgeDocuments: Record<
+    string,
+    import("./controllers/knowledge.js").KnowledgeDocumentsState
+  > = {};
+  @state() knowledgeUploadingFor: string | null = null;
+  @state() knowledgeDocumentConfirm:
+    | import("./controllers/knowledge.js").KnowledgeDocumentConfirm
+    | null = null;
+  @state() knowledgeDocumentNotice: string | null = null;
 
   @state() agentsLoading = false;
   @state() agentsList: AgentsListResult | null = null;

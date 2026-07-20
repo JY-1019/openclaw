@@ -178,6 +178,38 @@ export const ja_JP: TranslationMap = {
     referencedByNone: "どのワークフローステップからも参照されていません。",
     referencedByHint:
       "オントロジーの許可リストにこの基盤を指定しているステップです。許可リストは Enterprise タブで編集できます。",
+    files: "ファイル",
+    filesShow: "ファイルを表示",
+    filesHide: "ファイルを非表示",
+    filesEmpty: "まだドキュメントがアップロードされていません。",
+    filesReadOnly:
+      "この基盤は別の場所で運用されているため、ここではドキュメントは読み取り専用です。",
+    filesUnsupported: "このアダプターはドキュメント管理に対応していません。",
+    filesNotRegistered: "この基盤は登録が解除されています。リストを更新してください。",
+    filesFailed: "ドキュメントを読み込めませんでした。",
+    upload: "ドキュメントをアップロード",
+    uploading: "アップロード中…",
+    uploadAccepted:
+      "{name} がアップロードされました。インデックス作成はバックグラウンドで実行されます。",
+    uploadDuplicate:
+      "{name} という名前のドキュメントは既に存在します。再アップロードする前に削除してください。",
+    uploadTooLarge: "ファイルがアップロード上限の {limit} を超えています。",
+    uploadFailed: "アップロードに失敗しました: {detail}",
+    remove: "削除",
+    removeTitle: "{name} を削除しますか？",
+    removeBody:
+      "ドキュメントとそこからインデックスされたすべてのデータが削除されます。エージェントはこのドキュメントを取得できなくなります。この操作は元に戻せません。",
+    removeStarted: "{name} の削除が開始されました。バックグラウンドで実行されます。",
+    removeBusy: "ストアはインデックス作成中です。しばらくしてから再度削除をお試しください。",
+    removeFailed: "削除に失敗しました: {detail}",
+    docStatusPending: "保留中",
+    docStatusProcessing: "インデックス作成中",
+    docStatusIndexed: "インデックス済み",
+    docStatusFailed: "失敗",
+    docStatusUnknown: "不明",
+    docChunks: "{count} チャンク",
+    docSummary: "要約",
+    docNoSummary: "このストアではこのドキュメントのプレビューは提供されていません。",
   },
   enterprise: {
     title: "Enterprise",

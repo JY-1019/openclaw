@@ -331,6 +331,11 @@ export type AppViewState = {
     import("./controllers/knowledge.js").KnowledgeConnectionState
   >;
   knowledgeError: string | null;
+  knowledgeFilesOpenFor: string | null;
+  knowledgeDocuments: Record<string, import("./controllers/knowledge.js").KnowledgeDocumentsState>;
+  knowledgeUploadingFor: string | null;
+  knowledgeDocumentConfirm: import("./controllers/knowledge.js").KnowledgeDocumentConfirm | null;
+  knowledgeDocumentNotice: string | null;
   agentsLoading: boolean;
   agentsList: AgentsListResult | null;
   agentsError: string | null;
