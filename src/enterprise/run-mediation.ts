@@ -10,6 +10,7 @@
  */
 import { randomUUID } from "node:crypto";
 import {
+  failClosedWorkflowSelection,
   selectWorkflowPlan,
   type EnterpriseRouteSelection,
   type WorkflowPlanner,
@@ -189,18 +190,29 @@ async function beginEnterpriseRunInternal(
     });
     return decision.effect === "deny" || decision.effect === "require_approval";
   });
+  // The precheck above found a deny/approval, so no planner may run for this
+  // turn. Selection must then stay on the tree that policy TARGETS: the deny is
+  // re-evaluated below against the bound plan, and binding the permissive default
+  // here would make the very policy that withheld the planner miss and let the
+  // run through. This is deliberately not treated as planner unavailability.
+  const plannerWithheldByGovernance = anyCandidateDenied && mode === "enforce";
   // Only consult (and trace) the planner when one is actually wired. With no
   // planner there is no decision to record, and emitting a route event would make
   // every stock run write trace rows it never wrote before.
-  const plannerConsulted =
-    Boolean(params.routePlanner) && !(anyCandidateDenied && mode === "enforce");
-  const selection = await selectWorkflowPlan({
-    trees: candidates,
-    defaultTree,
-    requestText: params.prompt,
-    ...(plannerConsulted && params.routePlanner ? { planner: params.routePlanner } : {}),
-    ...(params.signal ? { signal: params.signal } : {}),
-  });
+  const plannerConsulted = Boolean(params.routePlanner) && !plannerWithheldByGovernance;
+  const selection = plannerWithheldByGovernance
+    ? failClosedWorkflowSelection({
+        trees: candidates,
+        defaultTree,
+        reason: "run-start governance denied a candidate before planning",
+      })
+    : await selectWorkflowPlan({
+        trees: candidates,
+        defaultTree,
+        requestText: params.prompt,
+        ...(params.routePlanner ? { planner: params.routePlanner } : {}),
+        ...(params.signal ? { signal: params.signal } : {}),
+      });
   const plan = buildPlanFor({
     tree: selection.tree,
     matchedBy: selection.treeSource,

@@ -42,7 +42,7 @@ const plannerReturning = (
   treeId: string | null,
   routes: string[],
   rationale = "because",
-): WorkflowPlanner => vi.fn(async () => ({ treeId, routes, rationale }));
+): WorkflowPlanner => vi.fn(async () => ({ kind: "decided" as const, treeId, routes, rationale }));
 
 const planFor = (requestText: string, planner?: WorkflowPlanner) =>
   selectWorkflowPlan({
@@ -163,10 +163,10 @@ describe("selectWorkflowPlan", () => {
   });
 
   it("fails closed when the reply is unparseable prose", async () => {
-    // The runtime parser returns null for prose; that reaches here as "no opinion".
+    // The runtime parser reports prose as "failed"; that reaches here as a failure.
     const selection = await planFor(
       "x",
-      vi.fn(async () => null),
+      vi.fn(async () => ({ kind: "failed" }) as const),
     );
     expect(selection.tree.id).toBe("acme.ops");
     expect(selection.treeSource).toBe("fallback");
@@ -179,13 +179,34 @@ describe("selectWorkflowPlan", () => {
     expect(selection.treeRationale).toContain("acme.ghost");
   });
 
-  it("binds the work-map, not the default, when no planner is wired", async () => {
+  it("binds the default tree when no planner is wired", async () => {
     const selection = await planFor("anything");
-    // Runtimes that wire no planner must not silently drop an operator's work-map;
-    // that is the hole keyword matching left open.
-    expect(selection.tree.id).toBe("acme.ops");
-    expect(selection.treeSource).toBe("fallback");
+    // No planner can be consulted, so nothing distinguishes this request from any
+    // other on the box. Binding the work-map here would put every unrelated
+    // request under it, planned whole — which is what it looked like in practice.
+    expect(selection.tree.id).toBe("clawworks.assist");
+    expect(selection.treeSource).toBe("unavailable");
     expect(selection.route.nodeIds).toBeNull();
+  });
+
+  it("separates a planner that cannot be consulted from one that answered badly", async () => {
+    // Same null-ish outcome, opposite bindings: "unavailable" is a property of the
+    // install (no request can cause it), while "failed" can be provoked by crafted
+    // text, so only the latter fails closed onto a work-map.
+    const unavailable = await planFor(
+      "anything",
+      vi.fn(async () => ({ kind: "unavailable" }) as const),
+    );
+    expect(unavailable.tree.id).toBe("clawworks.assist");
+    expect(unavailable.treeSource).toBe("unavailable");
+
+    const failed = await planFor(
+      "anything",
+      vi.fn(async () => ({ kind: "failed" }) as const),
+    );
+    expect(failed.tree.id).toBe("acme.ops");
+    expect(failed.treeSource).toBe("fallback");
+    expect(failed.route.nodeIds).toBeNull();
   });
 
   it("binds the default tree when no planner is wired and no work-map exists", async () => {

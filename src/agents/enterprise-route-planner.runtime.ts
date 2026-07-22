@@ -107,19 +107,20 @@ function stripJsonFence(text: string): string {
 export function parseWorkflowPlannerResponse(text: string): WorkflowPlanDecision {
   const stripped = stripJsonFence(text);
   if (!stripped.startsWith("{") || !stripped.endsWith("}")) {
-    return null;
+    return { kind: "failed" };
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(stripped);
   } catch {
-    return null;
+    return { kind: "failed" };
   }
   const result = responseSchema.safeParse(parsed);
   if (!result.success) {
-    return null;
+    return { kind: "failed" };
   }
   return {
+    kind: "decided",
     treeId: result.data.treeId,
     routes: result.data.routes,
     ...(result.data.rationale ? { rationale: result.data.rationale } : {}),
@@ -170,11 +171,11 @@ async function raceBudget<T>(
  * and warning on it would train operators to ignore the line that means the
  * planner is actually too slow.
  */
-function budgetExhausted(deadlines: readonly AbortSignal[]): null {
+function budgetExhausted(deadlines: readonly AbortSignal[]): WorkflowPlanDecision {
   if (deadlines.some((deadline) => deadline.aborted)) {
     log.warn("enterprise workflow planner: timed out; falling back to deterministic selection");
   }
-  return null;
+  return { kind: "failed" };
 }
 
 /**
@@ -233,9 +234,10 @@ export function createModelWorkflowPlanner(params: {
     completeWithPreparedSimpleCompletionModel;
 
   return async ({ requestText, candidates, signal }) => {
-    // A run cancelled before planning starts must never reach a provider.
+    // A run cancelled before planning starts must never reach a provider. The
+    // run is being torn down, so this verdict is never actually bound.
     if (signal?.aborted) {
-      return null;
+      return { kind: "failed" };
     }
     // The total budget is armed BEFORE model preparation and spans both phases, so
     // an abort landing mid-prep still stops the request text from reaching the
@@ -259,8 +261,13 @@ export function createModelWorkflowPlanner(params: {
         return budgetExhausted([totalDeadline]);
       }
       if ("error" in prepared) {
+        // No model could be built for planning at all — typically no auth for the
+        // run's provider (a CLI/subscription backend has no API key). That is a
+        // property of the install, not of this request, so it must NOT fail closed
+        // onto a work-map: every request on the box would land under whichever one
+        // sorts first. See selectWorkflowPlan's header.
         log.warn(`enterprise workflow planner: model unavailable (${prepared.error})`);
-        return null;
+        return { kind: "unavailable" };
       }
       // The budget may have been spent DURING prep. Re-check so a cancelled or
       // out-of-time run starts no completion request at all.
@@ -307,7 +314,9 @@ export function createModelWorkflowPlanner(params: {
         log.warn(
           `enterprise workflow planner: model call failed (${completionError}); falling back to deterministic selection`,
         );
-        return null;
+        // The provider WAS reached and refused. Unlike a missing model this can be
+        // transient or request-shaped, so it stays a fail-closed failure.
+        return { kind: "failed" };
       }
       const text = result.content
         .filter((block): block is { type: "text"; text: string } => block.type === "text")
@@ -315,7 +324,7 @@ export function createModelWorkflowPlanner(params: {
         .join("")
         .trim();
       const decision = parseWorkflowPlannerResponse(text);
-      if (!decision) {
+      if (decision.kind === "failed") {
         // Include a bounded, redacted head of the reply: without it an operator
         // cannot tell a truncated answer from a refusal or a wrong shape.
         log.warn(
@@ -327,7 +336,7 @@ export function createModelWorkflowPlanner(params: {
       log.warn(
         `enterprise workflow planner failed: ${err instanceof Error ? err.message : String(err)}`,
       );
-      return null;
+      return { kind: "failed" };
     }
   };
 }

@@ -11,6 +11,7 @@ export {
   buildPlanCandidateDigest,
   buildRouteCandidateDigest,
   countTreeNodes,
+  failClosedWorkflowSelection,
   resolveRouteNodeIds,
   selectWorkflowPlan,
   type EnterpriseRouteSelection,

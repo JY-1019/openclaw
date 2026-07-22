@@ -125,7 +125,7 @@ describe("beginEnterpriseRun", () => {
       });
       const planner = vi.fn(async () => {
         await gate;
-        return { treeId: "acme.big", routes: ["big.a"], rationale: "a" };
+        return { kind: "decided" as const, treeId: "acme.big", routes: ["big.a"], rationale: "a" };
       });
       const runId = nextRunId();
       const first = beginEnterpriseRun({ runId, prompt: "bigtest please", routePlanner: planner });
@@ -147,7 +147,7 @@ describe("beginEnterpriseRun", () => {
     // The planner awaits a provider. A cancel that lands in that window must not
     // persist run.started/route.selected for a turn that never ran.
     const controller = new AbortController();
-    const planner = vi.fn(async () => null);
+    const planner = vi.fn(async () => ({ kind: "failed" }) as const);
     const runId = nextRunId();
     // The turn is cancelled while mediation is starting (the planner awaits a
     // provider, so this is exactly the window that matters).
@@ -317,7 +317,12 @@ describe("beginEnterpriseRun", () => {
         ],
       },
     };
-    const planner = vi.fn(async () => ({ treeId: null, routes: [], rationale: "should not run" }));
+    const planner = vi.fn(async () => ({
+      kind: "decided" as const,
+      treeId: null,
+      routes: [],
+      rationale: "should not run",
+    }));
     const runId = nextRunId();
     const mediation = await beginEnterpriseRun({
       runId,
@@ -332,7 +337,12 @@ describe("beginEnterpriseRun", () => {
   });
 
   it("still plans a route in observe mode when a policy would deny (nothing is blocked)", async () => {
-    const planner = vi.fn(async () => ({ treeId: null, routes: [], rationale: "no narrowing" }));
+    const planner = vi.fn(async () => ({
+      kind: "decided" as const,
+      treeId: null,
+      routes: [],
+      rationale: "no narrowing",
+    }));
     const runId = nextRunId();
     const mediation = await beginEnterpriseRun({
       runId,
@@ -366,6 +376,7 @@ describe("beginEnterpriseRun", () => {
     // fallback would bind it — so asserting no model call also asserts that
     // stock installs stay free of per-request planning cost.
     const planner = vi.fn(async () => ({
+      kind: "decided" as const,
       treeId: "clawworks.support",
       routes: [],
       rationale: "support",
@@ -381,7 +392,42 @@ describe("beginEnterpriseRun", () => {
     endEnterpriseRun({ runId, status: "completed" });
   });
 
-  it("binds an imported work-map over the permissive default, with no planner wired", async () => {
+  it("still blocks when a policy denies the work-map and no planner runs", async () => {
+    // The precheck withholds the planner so a denied prompt never reaches a
+    // provider. Selection must stay on the tree the policy TARGETS: treating the
+    // withheld planner as "unavailable" would bind the permissive default, the
+    // acme.* deny would miss it, and the run this policy exists to stop would run.
+    const { importWorkflowTreeContent, removeImportedWorkflowTree } = await import("./tree-io.js");
+    const { invalidateWorkflowTreeRegistry } = await import("./tree-registry.js");
+    const imported = importWorkflowTreeContent({
+      content: JSON.stringify({
+        schema: "clawworks.workflow-tree",
+        schemaVersion: 1,
+        id: "acme.denied",
+        version: "1.0.0",
+        name: "Denied",
+        match: { triggers: ["user"] },
+        root: { id: "denied", title: "Denied work" },
+      }),
+      format: "json",
+    });
+    expect(imported.ok).toBe(true);
+    try {
+      const config: OpenClawConfig = {
+        enterprise: {
+          governance: { policies: [{ id: "deny.acme", effect: "deny", trees: ["acme.*"] }] },
+        },
+      };
+      const runId = nextRunId();
+      const mediation = await beginEnterpriseRun({ runId, prompt: "do the acme work", config });
+      expect(mediation.kind).toBe("blocked");
+    } finally {
+      removeImportedWorkflowTree("acme.denied");
+      invalidateWorkflowTreeRegistry();
+    }
+  });
+
+  it("leaves an imported work-map unbound when no planner can be consulted", async () => {
     const { importWorkflowTreeContent, removeImportedWorkflowTree } = await import("./tree-io.js");
     const { invalidateWorkflowTreeRegistry } = await import("./tree-registry.js");
     const imported = importWorkflowTreeContent({
@@ -399,16 +445,19 @@ describe("beginEnterpriseRun", () => {
     expect(imported.ok).toBe(true);
     try {
       const runId = nextRunId();
+      // No planner wired: nothing can judge whether this request belongs to the
+      // work-map, and no request can influence that. Binding it anyway would put
+      // EVERY request on this install under its tool scope, planned whole.
       const mediation = await beginEnterpriseRun({ runId, prompt: "please fix my invoice" });
       expect(mediation.kind).toBe("mediated");
       if (mediation.kind === "mediated") {
-        expect(mediation.plan.treeId).toBe("acme.billing");
-        // No planner is wired here, so selection fails closed onto the work-map
-        // rather than leaving the run on the guidance-free default.
-        expect(mediation.plan.matchedBy).toBe("fallback");
+        expect(mediation.plan.treeId).toBe("clawworks.assist");
+        expect(mediation.plan.matchedBy).toBe("unavailable");
       }
+      // The default tree is guidance-free, so the work-map's tool scope is not
+      // applied to a request nobody judged to belong to it.
       const verdict = evaluateEnterpriseToolCall({ runId, toolName: "exec" });
-      expect(verdict?.blocked).toBe(true);
+      expect(verdict?.blocked).toBeFalsy();
       endEnterpriseRun({ runId, status: "completed" });
     } finally {
       removeImportedWorkflowTree("acme.billing");
@@ -459,6 +508,14 @@ describe("endEnterpriseRun", () => {
 });
 
 describe("enterprise step tracing", () => {
+  const flowPlanner = () =>
+    vi.fn(async () => ({
+      kind: "decided" as const,
+      treeId: "acme.flow",
+      routes: [],
+      rationale: "flow",
+    }));
+
   async function withFlowTree<T>(run: () => T | Promise<T>): Promise<T> {
     const { importWorkflowTreeContent, removeImportedWorkflowTree } = await import("./tree-io.js");
     const { invalidateWorkflowTreeRegistry } = await import("./tree-registry.js");
@@ -494,7 +551,11 @@ describe("enterprise step tracing", () => {
   it("records the hook-driven step timeline (open + advance) in trace order", async () => {
     await withFlowTree(async () => {
       const runId = nextRunId();
-      const mediation = await beginEnterpriseRun({ runId, prompt: "run the flowtest now" });
+      const mediation = await beginEnterpriseRun({
+        runId,
+        prompt: "run the flowtest now",
+        routePlanner: flowPlanner(),
+      });
       expect(mediation.kind).toBe("mediated");
       // Simulate the embedded step-loop hook across two turns: enter the first
       // leaf, record the turn, then advance to the next leaf.
@@ -507,6 +568,8 @@ describe("enterprise step tracing", () => {
       const events = listEnterpriseRunEvents(record?.executionId ?? "");
       expect(events.map((event) => `${event.kind}:${event.nodeId ?? "-"}`)).toEqual([
         "run.started:-",
+        // Binding this work-map takes a planner, and consulting one is itself traced.
+        "route.selected:-",
         "node.entered:flow.a",
         "node.completed:flow.a",
         "node.entered:flow.b",
@@ -518,7 +581,11 @@ describe("enterprise step tracing", () => {
   it("re-persists the plan so the trace reports the advanced active node", async () => {
     await withFlowTree(async () => {
       const runId = nextRunId();
-      await beginEnterpriseRun({ runId, prompt: "run the flowtest now" });
+      await beginEnterpriseRun({
+        runId,
+        prompt: "run the flowtest now",
+        routePlanner: flowPlanner(),
+      });
       // Run-start snapshot points at the root scope.
       expect(getEnterpriseRunRecord(runId)?.plan.activeNodeId).toBe("flow");
       setEnterpriseStepForTurn(runId);
@@ -537,12 +604,17 @@ describe("enterprise step tracing", () => {
       const runId = nextRunId();
       // No step-loop hook runs, so no node events should be emitted and the run
       // stays on the root scope rather than claiming a leaf it never reached.
-      await beginEnterpriseRun({ runId, prompt: "run the flowtest now" });
+      await beginEnterpriseRun({
+        runId,
+        prompt: "run the flowtest now",
+        routePlanner: flowPlanner(),
+      });
       endEnterpriseRun({ runId, status: "completed" });
 
       const record = getEnterpriseRunRecord(runId);
       const kinds = listEnterpriseRunEvents(record?.executionId ?? "").map((event) => event.kind);
-      expect(kinds).toEqual(["run.started", "run.ended"]);
+      // route.selected comes from mediation; the absence of node.* is the point.
+      expect(kinds).toEqual(["run.started", "route.selected", "run.ended"]);
       expect(record?.plan.activeNodeId).toBe("flow");
     });
   });

@@ -43,18 +43,22 @@ const MIN_NODES_TO_PLAN = 5;
 const SUMMARY_MAX_CHARS = 120;
 
 /**
- * What the injected planner must return. Null means "no opinion" — a transport
- * or parsing failure, NOT a judgement that no tree applies. The two are kept
- * distinct on purpose: "no tree applies" is an answer and is honored, while "no
- * opinion" must not be allowed to drop a request out of governance (see
- * selectWorkflowPlan).
+ * What the injected planner must return. Three outcomes, kept distinct because
+ * selectWorkflowPlan treats each differently — collapsing any two of them either
+ * drops requests out of governance or drags every request into a work-map:
+ *
+ * - `decided` — the model answered. `treeId: null` inside it is itself an answer
+ *   ("no work-map applies") and is honored.
+ * - `unavailable` — the planner could not be consulted AT ALL: no model is
+ *   configured or authorized for it. That is a property of the install, not of
+ *   the request, and no request can provoke it.
+ * - `failed` — it WAS consulted and the transport or the answer was unusable.
+ *   A crafted request can provoke this, so it must not read as an answer.
  */
-export type WorkflowPlanDecision = {
-  /** Chosen tree id, or null when the model judged that no work-map applies. */
-  treeId: string | null;
-  routes: string[];
-  rationale?: string;
-} | null;
+export type WorkflowPlanDecision =
+  | { kind: "decided"; treeId: string | null; routes: string[]; rationale?: string }
+  | { kind: "unavailable" }
+  | { kind: "failed" };
 
 export type WorkflowPlanner = (params: {
   /** Candidate trees, in the caller's deterministic order. */
@@ -85,8 +89,14 @@ export type WorkflowTreeSource =
   /** The model judged that no work-map applies; the default tree governs. */
   | "no-match"
   /**
-   * The model could not be reached, or answered unusably. A domain tree governs
-   * rather than the permissive default — see selectWorkflowPlan.
+   * No planner could be consulted for this run at all. The default tree governs:
+   * an install that can never plan would otherwise put EVERY request, including
+   * unrelated ones, under whichever work-map sorts first — see selectWorkflowPlan.
+   */
+  | "unavailable"
+  /**
+   * A planner WAS consulted and answered unusably. A domain tree governs rather
+   * than the permissive default — see selectWorkflowPlan.
    */
   | "fallback";
 
@@ -265,20 +275,54 @@ function selectionWithoutModel<TTree extends WorkflowTreeDefinition>(
 }
 
 /**
+ * The selection for a run nothing may judge, but governance must still see a
+ * work-map for: the first domain candidate, planned whole.
+ *
+ * Exported because mediation withholds an otherwise-available planner when a
+ * run-start policy already denies a candidate — the prompt must not reach a
+ * provider for a run that is going to be blocked. That is NOT the same as having
+ * no planner: binding the permissive default there would make the very policy
+ * that withheld the planner miss its target, and the run would be allowed.
+ */
+export function failClosedWorkflowSelection<TTree extends WorkflowTreeDefinition>(params: {
+  trees: readonly TTree[];
+  defaultTree: TTree;
+  reason: string;
+}): EnterpriseWorkflowSelection<TTree> {
+  // Candidate order is the caller's contract: the first domain tree is the one a
+  // failure binds (see the module header).
+  const firstDomainTree = params.trees.find((tree) => tree.id !== params.defaultTree.id);
+  return selectionWithoutModel(
+    firstDomainTree ?? params.defaultTree,
+    "fallback",
+    params.reason,
+    "planning the whole tree",
+  );
+}
+
+/**
  * Choose the governing tree and the route through it, for one request.
  *
- * FAILING CLOSED. Three outcomes are deliberately not the same thing:
+ * FAILING CLOSED. Four outcomes are deliberately not the same thing:
  *
  * - The model answers `treeId: null` — "no work-map applies". That is a
  *   judgement, and it is honored: the default tree governs, which is how a
  *   coding question on a machine that also holds a finance work-map keeps
  *   working.
- * - The model cannot be reached, or answers unusably (prose, a tree id that does
- *   not exist). That is NOT a judgement and must not read as one. A hostile
- *   request can provoke it — the strict parser rejects prose, so text crafted to
- *   make the planner ramble would otherwise be a reliable way to fall out of
- *   governance. So a failure binds the first domain candidate and plans it
+ * - The model answers unusably (prose, a tree id that does not exist), or the
+ *   call itself blows up. That is NOT a judgement and must not read as one. A
+ *   hostile request can provoke it — the strict parser rejects prose, so text
+ *   crafted to make the planner ramble would otherwise be a reliable way to fall
+ *   out of governance. So a failure binds the first domain candidate and plans it
  *   WHOLE: over-restrictive, never unGOVERNED.
+ * - NO planner can be consulted for this run — none was wired, or none is
+ *   configured/authorized. The default tree governs. This is deliberately NOT the
+ *   failure case: a request cannot cause it, it is the same answer for every run
+ *   on the box, and treating it as failure would put every unrelated request
+ *   (a poem, a refactor) under whichever work-map happens to sort first, planned
+ *   whole. The tradeoff is accepted and real: if planner auth breaks silently,
+ *   work-maps stop governing until it is fixed. The runtime logs a warning when
+ *   it cannot build a planner, and `matchedBy: "unavailable"` on the run records it.
  * - No domain candidate exists at all (the stock install). Then the default tree
  *   is the only answer, and no model call is made for it.
  */
@@ -307,29 +351,23 @@ export async function selectWorkflowPlan<TTree extends WorkflowTreeDefinition>(p
       );
     }
   }
-  if (!params.planner) {
-    // A work-map is installed but nothing can be asked which one applies. Binding
-    // the permissive default here would mean an operator's work-map silently
-    // stops governing whole runtimes (the ones that wire no planner) — the exact
-    // hole this replaced keyword matching to close. Bind the work-map instead,
-    // planned whole: over-restrictive, never unGOVERNED.
-    return selectionWithoutModel(
-      domainTrees[0] ?? params.defaultTree,
-      domainTrees.length === 0 ? "only-candidate" : "fallback",
-      "no workflow planner configured",
-      "no workflow planner configured",
+  /** No planner at all for this run: the default governs. See the header. */
+  const unplanned = (reason: string): EnterpriseWorkflowSelection<TTree> =>
+    selectionWithoutModel(
+      params.defaultTree,
+      "unavailable",
+      reason,
+      "the default tree has no route to plan",
     );
+
+  if (!params.planner) {
+    return unplanned("no workflow planner is wired for this runtime");
   }
 
   const byId = new Map(params.trees.map((tree) => [tree.id, tree]));
-  /** A failure must still be governed: bind a work-map, planned whole. */
+  /** A consulted planner that answered unusably must still be governed. */
   const failClosed = (reason: string): EnterpriseWorkflowSelection<TTree> =>
-    selectionWithoutModel(
-      domainTrees[0] ?? params.defaultTree,
-      "fallback",
-      reason,
-      "planning the whole tree",
-    );
+    failClosedWorkflowSelection({ trees: params.trees, defaultTree: params.defaultTree, reason });
 
   let decision: WorkflowPlanDecision;
   try {
@@ -344,7 +382,10 @@ export async function selectWorkflowPlan<TTree extends WorkflowTreeDefinition>(p
       `workflow planner failed (${err instanceof Error ? err.message : String(err)})`,
     );
   }
-  if (!decision) {
+  if (decision.kind === "unavailable") {
+    return unplanned("no workflow planner is configured for this run");
+  }
+  if (decision.kind === "failed") {
     return failClosed("workflow planner returned no decision");
   }
 

@@ -154,10 +154,26 @@ When a request starts an enterprise-mediated run:
 1. **Selection** narrows the imported work-maps to the ones serving the run's
    trigger, then a model judges which of them governs the request. Built-in
    trees other than the default are shipped examples and never govern until you
-   import them. When no work-map applies, when none is imported, or when the
-   model cannot be reached, selection stays deterministic: the default tree
-   governs on a judged "none apply", and a work-map planned whole governs when
-   the model is unavailable, so a failure is never a way out of governance.
+   import them. The `matchedBy` recorded on the run says which path it took:
+
+   | `matchedBy`      | What happened                                   | What governs                      |
+   | ---------------- | ----------------------------------------------- | --------------------------------- |
+   | `planner`        | The model chose a work-map                      | that work-map, routed             |
+   | `no-match`       | The model judged that none apply                | the default tree                  |
+   | `only-candidate` | No work-map is installed for this trigger       | the default tree                  |
+   | `unavailable`    | No planner could be consulted at all            | the default tree                  |
+   | `fallback`       | A planner answered unusably, or the call failed | the first work-map, planned whole |
+
+   The last two look alike but must not be confused. `fallback` fails closed onto
+   a work-map because a crafted request can provoke an unusable answer, and that
+   must not become a way out of governance. `unavailable` means no model is
+   configured or authorized for planning — a property of the install that no
+   request can trigger — so the default tree governs instead; otherwise every
+   request on that machine, a poem included, would run under whichever work-map
+   sorts first. If work-maps stop binding, check for
+   `enterprise workflow planner: model unavailable` in the gateway log: a backend
+   without a direct API credential (a CLI or subscription runtime) cannot plan.
+
 2. **Decomposition** flattens the chosen subtree into a depth-first plan. For
    embedded and CLI runs the whole subtree's guidance is injected once as a
    static step digest so the model sees every step's rules up front (this keeps

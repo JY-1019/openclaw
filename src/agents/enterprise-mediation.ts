@@ -183,7 +183,9 @@ export async function applyEnterpriseMediation<T extends EnterpriseMediatedRunPa
             ...(modelChoice.kind === "ref" ? { modelRef: modelChoice.ref } : {}),
             ...(params.authProfileId ? { authProfileId: params.authProfileId } : {}),
           });
-          return planner ? await planner(plannerParams) : null;
+          // No planner could be built (no config): "cannot be consulted", not
+          // "answered badly" — the default tree governs rather than a work-map.
+          return planner ? await planner(plannerParams) : { kind: "unavailable" };
         }
       : undefined;
   const mediation = await beginEnterpriseRun({

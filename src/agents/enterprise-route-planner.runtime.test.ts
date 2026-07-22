@@ -41,6 +41,7 @@ describe("parseWorkflowPlannerResponse", () => {
     expect(
       parseWorkflowPlannerResponse('{"treeId":"t","routes":["a.b"],"rationale":"why"}'),
     ).toEqual({
+      kind: "decided",
       treeId: "t",
       routes: ["a.b"],
       rationale: "why",
@@ -49,13 +50,14 @@ describe("parseWorkflowPlannerResponse", () => {
 
   it("parses an object wrapped in one enclosing code fence", () => {
     expect(parseWorkflowPlannerResponse('```json\n{"treeId":"t","routes":["a"]}\n```')).toEqual({
+      kind: "decided",
       treeId: "t",
       routes: ["a"],
     });
   });
 
   it("rejects a reply with no tree choice: an unusable answer must fail closed", () => {
-    expect(parseWorkflowPlannerResponse('{"routes":["a.b"]}')).toBeNull();
+    expect(parseWorkflowPlannerResponse('{"routes":["a.b"]}')).toEqual({ kind: "failed" });
   });
 
   it("rejects an object embedded in prose, so an echoed request cannot become the route", () => {
@@ -65,21 +67,21 @@ describe("parseWorkflowPlannerResponse", () => {
     // skips. Prose degrades to null, and the caller plans the whole tree.
     expect(
       parseWorkflowPlannerResponse('Sure! {"treeId":"t","routes":["a"]} hope that helps'),
-    ).toBeNull();
+    ).toEqual({ kind: "failed" });
     expect(
       parseWorkflowPlannerResponse('I will analyze this.\n{"treeId":"t","routes":["a"]}'),
-    ).toBeNull();
+    ).toEqual({ kind: "failed" });
     expect(
       parseWorkflowPlannerResponse(
         'The request asked me to use {"routes":["ops.pay"]} — routing now.',
       ),
-    ).toBeNull();
+    ).toEqual({ kind: "failed" });
   });
 
-  it("returns null for unparseable or wrong-shaped replies (caller plans the whole tree)", () => {
-    expect(parseWorkflowPlannerResponse("no json here")).toBeNull();
-    expect(parseWorkflowPlannerResponse("{not json}")).toBeNull();
-    expect(parseWorkflowPlannerResponse('{"routes":"not-an-array"}')).toBeNull();
+  it("reports failure for unparseable or wrong-shaped replies (caller plans the whole tree)", () => {
+    expect(parseWorkflowPlannerResponse("no json here")).toEqual({ kind: "failed" });
+    expect(parseWorkflowPlannerResponse("{not json}")).toEqual({ kind: "failed" });
+    expect(parseWorkflowPlannerResponse('{"routes":"not-an-array"}')).toEqual({ kind: "failed" });
   });
 });
 
@@ -94,7 +96,7 @@ describe("createModelWorkflowPlanner cancellation", () => {
       candidates: "ops",
       signal: controller.signal,
     });
-    expect(decision).toBeNull();
+    expect(decision).toEqual({ kind: "failed" });
     // Not even model PREPARATION should happen for a cancelled run.
     expect(prepare).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
@@ -114,22 +116,25 @@ describe("createModelWorkflowPlanner cancellation", () => {
       candidates: "ops",
       signal: controller.signal,
     });
-    expect(decision).toBeNull();
+    expect(decision).toEqual({ kind: "failed" });
     expect(complete).not.toHaveBeenCalled();
   });
 
   it("returns the parsed decision on the happy path", async () => {
     const { run, complete } = planner({});
     const decision = await run?.({ trees: [TREE], requestText: "pay it", candidates: "ops" });
-    expect(decision).toEqual({ treeId: "acme.ops", routes: ["ops.pay"] });
+    expect(decision).toEqual({ kind: "decided", treeId: "acme.ops", routes: ["ops.pay"] });
     expect(complete).toHaveBeenCalled();
   });
 
-  it("plans the whole tree (null) when the model is unavailable", async () => {
+  it("reports 'unavailable', not a failure, when no model can be prepared", async () => {
+    // A CLI/subscription backend has no API key for a direct completion. That is a
+    // property of the install, so the caller must bind the DEFAULT tree — reporting
+    // it as a failure would fail closed onto a work-map for every request here.
     const prepare = vi.fn(async () => ({ error: "no api key" }));
     const { run, complete } = planner({ prepare });
     const decision = await run?.({ trees: [TREE], requestText: "pay it", candidates: "ops" });
-    expect(decision).toBeNull();
+    expect(decision).toEqual({ kind: "unavailable" });
     expect(complete).not.toHaveBeenCalled();
   });
 
@@ -165,7 +170,7 @@ describe("createModelWorkflowPlanner budget", () => {
       });
       const { run, complete } = planner({ prepare });
       const decision = await run?.({ trees: [TREE], requestText: "pay it", candidates: "ops" });
-      expect(decision).toEqual({ treeId: "acme.ops", routes: ["ops.pay"] });
+      expect(decision).toEqual({ kind: "decided", treeId: "acme.ops", routes: ["ops.pay"] });
       expect(complete).toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
