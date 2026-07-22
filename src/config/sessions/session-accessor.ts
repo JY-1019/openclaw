@@ -37,6 +37,7 @@ import {
   type PluginHostSessionCleanupStoreParams,
 } from "./plugin-host-cleanup.js";
 import { resolveAndPersistSessionFile } from "./session-file.js";
+import { invalidateSessionStoreCache } from "./store-cache.js";
 import type {
   ResolvedSessionMaintenanceConfig,
   SessionMaintenanceWarning,
@@ -1790,6 +1791,13 @@ export async function commitReplySessionInitialization(params: {
     },
   );
   if (!committed.ok) {
+    // Evict AFTER updateSessionStore returns. A skipped save restores the writer
+    // cache on the way out, so invalidating inside the mutator would be undone.
+    // The cache is keyed on mtime+size, so a competing write of the SAME byte
+    // length inside the filesystem's mtime granularity still looks current — a
+    // caller retrying on this result would otherwise re-read the identical stale
+    // store and lose for the same reason every time.
+    invalidateSessionStoreCache(params.storePath);
     return committed;
   }
 

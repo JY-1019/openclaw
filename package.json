@@ -1590,6 +1590,8 @@
     "deps:vuln:gate": "node scripts/dependency-vulnerability-gate.mjs",
     "db:kysely:check": "node scripts/generate-kysely-types.mjs --verify",
     "db:kysely:gen": "node scripts/generate-kysely-types.mjs",
+    "enterprise:golden": "node --import tsx scripts/enterprise-golden.ts",
+    "enterprise:report": "node --import tsx scripts/enterprise-report.ts",
     "dev": "node scripts/run-node.mjs",
     "dev:ui:mock": "node --import tsx scripts/control-ui-mock-dev.ts",
     "docs:bin": "node scripts/build-docs-list.mjs",

@@ -1,0 +1,156 @@
+# Golden fixture work-map: order support with SEEDED DATA.
+#
+# The other two examples declare types but seed no instances, so a test prompt
+# naming an order or a ticket refers to nothing and there is no way to tell a
+# working ontology from an empty one. This one ships instances, so the ids below
+# are real and `search_objects` / `get_neighbors` / `compute_function` return
+# rows. `scripts/enterprise-golden.ts` asserts against exactly these values.
+#
+# Keep it small and boring on purpose: every id, tool scope, and seeded row here
+# is an assertion somewhere, so changing one is changing a test.
+schema: clawworks.workflow-tree
+schemaVersion: 1
+id: golden.orders
+version: 1.0.0
+name: Order support
+description: >-
+  Order support for a small retail shop: look up an order, investigate what went
+  wrong with it, then either refund it or hand it to a human. Covers returns,
+  refunds, delivery complaints, and order lookups.
+match:
+  # A model judges whether a request belongs here; `triggers` is the one gate it
+  # cannot override.
+  triggers: [user]
+
+root:
+  id: golden
+  title: Order support
+  description: Root scope for order support work.
+  ontology:
+    # Root denials are inherited by every step, so no leaf can widen them.
+    deniedTools: [exec, process, browser]
+    contextHints:
+      - Always name the order id you acted on.
+    entities:
+      - id: customer
+        title: Customer
+        properties:
+          - { id: id, type: id, primaryKey: true }
+          - { id: name, type: string, required: true }
+          - { id: tier, type: string }
+      - id: order
+        title: Order
+        properties:
+          - { id: id, type: id, primaryKey: true }
+          - { id: customer-id, type: id, required: true }
+          - { id: total, type: number, required: true }
+          - { id: status, type: string, required: true }
+      - id: ticket
+        title: Support ticket
+        properties:
+          - { id: id, type: id, primaryKey: true }
+          - { id: order-id, type: id, required: true }
+          - { id: reason, type: string, required: true }
+          - { id: resolved, type: boolean }
+      - id: refund
+        title: Refund
+        properties:
+          - { id: id, type: id, primaryKey: true }
+          - { id: order-id, type: id, required: true }
+          - { id: amount, type: number, required: true }
+    relationships:
+      - id: placed
+        from: customer
+        to: order
+        cardinality: one-to-many
+        description: The customer who placed the order.
+      - id: concerns
+        from: ticket
+        to: order
+        cardinality: many-to-one
+        description: The order a ticket is about.
+      - id: settles
+        from: refund
+        to: order
+        cardinality: one-to-one
+        description: The order a refund settles.
+    functions:
+      - id: auto-refundable-amount
+        entity: order
+        returns: number
+        # Property refs take a "$" prefix. Capped at the approval limit below, so
+        # the value itself says how much can be refunded without a human.
+        expression: min($total, 200)
+        description: What this order can be refunded without human approval.
+    # Seeded instances. These ids are what test prompts should name.
+    objects:
+      - entity: customer
+        properties: { id: CUST-1001, name: Ada Ruiz, tier: standard }
+      - entity: customer
+        properties: { id: CUST-1002, name: Bo Lindqvist, tier: priority }
+      - entity: order
+        properties: { id: ORD-5001, customer-id: CUST-1001, total: 42, status: delivered }
+      - entity: order
+        properties: { id: ORD-5002, customer-id: CUST-1001, total: 310, status: delivered }
+      - entity: order
+        properties: { id: ORD-5003, customer-id: CUST-1002, total: 88, status: in-transit }
+      - entity: ticket
+        properties: { id: TKT-77, order-id: ORD-5002, reason: damaged on arrival, resolved: false }
+      - entity: ticket
+        properties: { id: TKT-78, order-id: ORD-5003, reason: never delivered, resolved: false }
+      - entity: refund
+        properties: { id: REF-9001, order-id: ORD-5001, amount: 42 }
+    links:
+      - { relationship: placed, from: CUST-1001, to: ORD-5001 }
+      - { relationship: placed, from: CUST-1001, to: ORD-5002 }
+      - { relationship: placed, from: CUST-1002, to: ORD-5003 }
+      - { relationship: concerns, from: TKT-77, to: ORD-5002 }
+      - { relationship: concerns, from: TKT-78, to: ORD-5003 }
+      - { relationship: settles, from: REF-9001, to: ORD-5001 }
+
+  children:
+    - id: golden.triage
+      title: Triage the request
+      description: Classify the complaint and find the order it is about.
+      ontology:
+        allowedTools: [search_objects, get_neighbors]
+        expectedOutput: The ticket id, the order id, and the reason.
+        audit: true
+
+    - id: golden.investigate
+      title: Investigate the order
+      description: Read the order's history and work out what went wrong.
+      ontology:
+        allowedTools: [search_objects, get_neighbors, compute_function]
+        expectedOutput: What happened to the order, with the amount at stake.
+
+    - id: golden.resolve
+      title: Resolve or refund
+      description: Issue a refund within the limit, or reply with the outcome.
+      ontology:
+        allowedTools: [invoke_action, message]
+        actions:
+          - id: issue-refund
+            title: Issue a refund
+            tools: [invoke_action]
+            parameters:
+              # The primary key identifies the refund the create effect writes;
+              # without it no call can name the new object and every invocation
+              # fails validation.
+              - { id: id, type: id, required: true }
+              - { id: order-id, type: id, required: true }
+              - { id: amount, type: number, required: true }
+            effects:
+              - { entity: refund, kind: create, description: Records the repayment. }
+        constraints:
+          - id: refund-cap
+            description: Refunds above 200 need a human approver.
+        expectedOutput: The refund id, or the reason no refund was issued.
+        audit: true
+
+    - id: golden.escalate
+      title: Hand off to a human
+      description: Summarize for a human when the shop cannot resolve it.
+      ontology:
+        allowedTools: [message]
+        expectedOutput: A handoff note naming the order and what was tried.

@@ -30,10 +30,10 @@ import {
 } from "../../test-utils/channel-plugins.js";
 import { withEnvAsync } from "../../test-utils/env.js";
 import { createSessionConversationTestRegistry } from "../../test-utils/session-conversation-registry.js";
+import { replyRunRegistry } from "./reply-run-registry.js";
 import { drainFormattedSystemEvents } from "./session-updates.js";
 import { persistSessionUsageUpdate } from "./session-usage.js";
 import { initSessionState } from "./session.js";
-import { replyRunRegistry } from "./reply-run-registry.js";
 
 const sessionForkMocks = vi.hoisted(() => ({
   forkSessionFromParent: vi.fn(),
@@ -51,6 +51,29 @@ type ForkSessionParamsForTest = {
   parentEntry: SessionEntry;
   sessionsDir: string;
 };
+
+/**
+ * Lets one test force the guarded commit to report a stale snapshot N times in a
+ * row. Default 0, so every other test in this file sees the real implementation.
+ * Hoisted because vi.mock factories run before ordinary top-level declarations.
+ */
+const forcedStaleCommits = vi.hoisted(() => ({ remaining: 0 }));
+
+vi.mock("../../config/sessions/session-accessor.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../config/sessions/session-accessor.js")>();
+  return {
+    ...actual,
+    commitReplySessionInitialization: async (
+      params: Parameters<typeof actual.commitReplySessionInitialization>[0],
+    ) => {
+      if (forcedStaleCommits.remaining > 0) {
+        forcedStaleCommits.remaining -= 1;
+        return { ok: false as const, reason: "stale-snapshot" as const, revision: "forced" };
+      }
+      return await actual.commitReplySessionInitialization(params);
+    },
+  };
+});
 
 vi.mock("./session-fork.js", () => ({
   forkSessionEntryFromParent: async (params: {
@@ -511,6 +534,35 @@ describe("initSessionState guarded initialization", () => {
     await heldWriter;
 
     await expect(Promise.all(turns)).resolves.toHaveLength(8);
+  });
+
+  it("recovers when the guarded snapshot goes stale more than once", async () => {
+    // The guard revision is the WHOLE serialized entry, so any writer touching it
+    // between snapshot and commit invalidates an otherwise-correct decision. One
+    // retry was not enough: two conflicts in a row failed the turn outright with
+    // "reply session initialization conflicted". Force exactly that — a single
+    // forced conflict would still pass under the old single-retry code.
+    const storePath = await createStorePath("openclaw-session-init-stale-");
+    const sessionKey = "agent:main:telegram:chat:99";
+    await writeSessionStoreFast(storePath, {
+      [sessionKey]: { sessionId: "existing-session", updatedAt: 100 },
+    });
+    const cfg = { session: { store: storePath } } as OpenClawConfig;
+
+    forcedStaleCommits.remaining = 2;
+    try {
+      await expect(
+        initSessionState({
+          ctx: { Body: "hello", SessionKey: sessionKey },
+          cfg,
+          commandAuthorized: true,
+        }),
+      ).resolves.toBeDefined();
+      // Both forced conflicts were consumed, so the run really did retry twice.
+      expect(forcedStaleCommits.remaining).toBe(0);
+    } finally {
+      forcedStaleCommits.remaining = 0;
+    }
   });
 });
 

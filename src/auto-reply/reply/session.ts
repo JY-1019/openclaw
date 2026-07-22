@@ -72,13 +72,13 @@ import { parseSoftResetCommand } from "./commands-reset-mode.js";
 import { resolveConversationBindingContextFromMessage } from "./conversation-binding-input.js";
 import { normalizeInboundTextNewlines } from "./inbound-text.js";
 import { stripMentions, stripStructuralPrefixes } from "./mentions.js";
+import { replyRunRegistry } from "./reply-run-registry.js";
 import { isResetAuthorizedForContext } from "./reset-authorization.js";
 import {
   maybeRetireLegacyMainDeliveryRoute,
   resolveLastChannelRaw,
   resolveLastToRaw,
 } from "./session-delivery.js";
-import { replyRunRegistry } from "./reply-run-registry.js";
 import {
   createReplySessionEntryHandle,
   type ReplySessionEntryHandle,
@@ -307,28 +307,39 @@ function resolveInitSessionStateAttemptContext(
   };
 }
 
+/**
+ * How many times initialization may re-read and re-commit when its snapshot goes
+ * stale. The guard revision is the WHOLE serialized entry, so any concurrent
+ * write to that entry invalidates a snapshot whose initialization decision is
+ * still correct — a finishing turn's bookkeeping is enough. One retry was not:
+ * a reconnect followed by a quick second message failed the turn outright with
+ * "reply session initialization conflicted". Bounded so a writer that never
+ * settles still surfaces instead of looping.
+ */
+const SESSION_INIT_ATTEMPTS = 5;
+
 /** Initializes or reuses the reply session state for one inbound turn. */
 export async function initSessionState(params: InitSessionStateParams): Promise<SessionInitResult> {
-  return await initSessionStateAttempt(params, false);
+  return await initSessionStateAttempt(params, SESSION_INIT_ATTEMPTS);
 }
 
 async function initSessionStateAttempt(
   params: InitSessionStateParams,
-  staleSnapshotRetried: boolean,
+  attemptsLeft: number,
 ): Promise<SessionInitResult> {
   const attemptContext = resolveInitSessionStateAttemptContext(params);
   // Guarded revision checks only serialize correctly when the snapshot and
   // commit share the same writer lane.
   return await runExclusiveSessionStoreWrite(
     attemptContext.storePath,
-    async () => await initSessionStateAttemptLocked(params, attemptContext, staleSnapshotRetried),
+    async () => await initSessionStateAttemptLocked(params, attemptContext, attemptsLeft),
   );
 }
 
 async function initSessionStateAttemptLocked(
   params: InitSessionStateParams,
   attemptContext: InitSessionStateAttemptContext,
-  staleSnapshotRetried: boolean,
+  attemptsLeft: number,
 ): Promise<SessionInitResult> {
   const { ctx, cfg, commandAuthorized } = params;
   const { agentId, conversationBindingContext, isSystemEvent, sessionCtxForState, storePath } =
@@ -930,8 +941,12 @@ async function initSessionStateAttemptLocked(
     storePath,
   });
   if (!committed.ok) {
-    if (!staleSnapshotRetried) {
-      return await initSessionStateAttemptLocked(params, attemptContext, true);
+    // Retry inside the same lock: re-reading the snapshot here is what makes the
+    // next commit see the writer that moved it.
+    if (attemptsLeft > 1) {
+      // The commit already dropped its own cache for this store, so the next
+      // attempt re-reads from the backend rather than the snapshot that lost.
+      return await initSessionStateAttemptLocked(params, attemptContext, attemptsLeft - 1);
     }
     throw new Error(`reply session initialization conflicted for ${sessionKey}`);
   }
