@@ -233,6 +233,7 @@ export const en: TranslationMap = {
     treeUnavailable: "Tree definition is no longer available.",
     structureTitle: "Structure",
     ontologyTitle: "Ontology",
+    wholeTreeOverviewTitle: "Whole-tree overview",
     action: "Action: {id}",
     constraint: "Constraint: {text}",
     noOntology: "This tree declares no ontology entities or relationships.",
@@ -257,6 +258,9 @@ export const en: TranslationMap = {
     routeViewRoute: "Route only",
     routeViewTree: "Whole tree",
     routeViewTreeUnavailable: "The tree changed since this run, so it cannot be shown.",
+    routeExpand: "Expand",
+    routeExpandTitle: "Workflow route",
+    routeExpandClose: "Close",
     propertyPrimaryKey: "PK",
     propertyRequired: "required",
     mode: {

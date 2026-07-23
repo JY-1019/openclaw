@@ -240,6 +240,7 @@ export const nl: TranslationMap = {
     treeUnavailable: "Boomdefinitie is niet meer beschikbaar.",
     structureTitle: "Structuur",
     ontologyTitle: "Ontologie",
+    wholeTreeOverviewTitle: "Volledig boomoverzicht",
     action: "Actie: {id}",
     constraint: "Beperking: {text}",
     noOntology: "Deze boom bevat geen ontologie-entiteiten of -relaties.",
@@ -265,6 +266,9 @@ export const nl: TranslationMap = {
     routeViewTree: "Volledige boom",
     routeViewTreeUnavailable:
       "De boom is gewijzigd sinds deze uitvoering en kan daarom niet worden weergegeven.",
+    routeExpand: "Uitvouwen",
+    routeExpandTitle: "Workflowroute",
+    routeExpandClose: "Sluiten",
     propertyPrimaryKey: "PK",
     propertyRequired: "verplicht",
     mode: {

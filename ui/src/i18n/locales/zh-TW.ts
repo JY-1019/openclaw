@@ -231,6 +231,7 @@ export const zh_TW: TranslationMap = {
     treeUnavailable: "樹狀結構定義已無法使用。",
     structureTitle: "結構",
     ontologyTitle: "本體",
+    wholeTreeOverviewTitle: "整體樹狀概覽",
     action: "動作：{id}",
     constraint: "約束條件：{text}",
     noOntology: "此樹狀結構未宣告任何本體實體或關係。",
@@ -255,6 +256,9 @@ export const zh_TW: TranslationMap = {
     routeViewRoute: "僅路由",
     routeViewTree: "完整樹狀結構",
     routeViewTreeUnavailable: "此次執行後樹狀結構已變更，因此無法顯示。",
+    routeExpand: "展開",
+    routeExpandTitle: "工作流程路由",
+    routeExpandClose: "關閉",
     propertyPrimaryKey: "PK",
     propertyRequired: "必填",
     mode: {

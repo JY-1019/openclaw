@@ -230,6 +230,7 @@ export const zh_CN: TranslationMap = {
     treeUnavailable: "树定义已不再可用。",
     structureTitle: "结构",
     ontologyTitle: "本体",
+    wholeTreeOverviewTitle: "全树概览",
     action: "操作：{id}",
     constraint: "约束：{text}",
     noOntology: "此树未声明任何本体实体或关系。",
@@ -254,6 +255,9 @@ export const zh_CN: TranslationMap = {
     routeViewRoute: "仅路由",
     routeViewTree: "完整树",
     routeViewTreeUnavailable: "自此次运行以来树已更改，因此无法显示。",
+    routeExpand: "展开",
+    routeExpandTitle: "工作流路由",
+    routeExpandClose: "关闭",
     propertyPrimaryKey: "PK",
     propertyRequired: "必填",
     mode: {

@@ -238,6 +238,7 @@ export const tr: TranslationMap = {
     treeUnavailable: "Ağaç tanımı artık mevcut değil.",
     structureTitle: "Yapı",
     ontologyTitle: "Ontoloji",
+    wholeTreeOverviewTitle: "Tüm ağaç görünümü",
     action: "Eylem: {id}",
     constraint: "Kısıtlama: {text}",
     noOntology: "Bu ağaç herhangi bir ontoloji varlığı veya ilişkisi bildirmiyor.",
@@ -262,6 +263,9 @@ export const tr: TranslationMap = {
     routeViewRoute: "Yalnızca rota",
     routeViewTree: "Tüm ağaç",
     routeViewTreeUnavailable: "Bu çalıştırmadan bu yana ağaç değiştiği için gösterilemiyor.",
+    routeExpand: "Genişlet",
+    routeExpandTitle: "İş akışı rotası",
+    routeExpandClose: "Kapat",
     propertyPrimaryKey: "PK",
     propertyRequired: "zorunlu",
     mode: {

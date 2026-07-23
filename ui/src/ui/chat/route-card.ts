@@ -15,6 +15,7 @@ import type {
 import { t } from "../../i18n/index.ts";
 import type { WorkflowTreeNode } from "../components/workflow-tree-graph.ts";
 import "../components/workflow-tree-graph.ts";
+import "../components/modal-dialog.ts";
 
 type CardMode = "route" | "tree";
 
@@ -55,6 +56,8 @@ export class OpenClawChatRouteCard extends LitElement {
   @property({ attribute: false }) tree: EnterpriseTreeDetail | null = null;
 
   @state() private mode: CardMode = "route";
+  /** The same graph, reopened in a larger modal for easier reading. */
+  @state() private expanded = false;
 
   static override styles = css`
     :host {
@@ -146,6 +149,59 @@ export class OpenClawChatRouteCard extends LitElement {
       margin-top: 6px;
       color: var(--muted);
     }
+
+    .expand {
+      padding: 2px 8px;
+      font: inherit;
+      font-size: 13px;
+      line-height: 1;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .expand:hover {
+      color: var(--text-strong);
+    }
+
+    .modal-body {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 12px 14px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      max-height: calc(100dvh - 96px);
+      overflow: auto;
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .modal-head .title {
+      flex: 1;
+    }
+
+    .modal-close {
+      padding: 2px 10px;
+      font: inherit;
+      font-size: 12px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid var(--border-strong);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .modal-body openclaw-workflow-tree-graph {
+      min-height: 60vh;
+    }
   `;
 
   override render() {
@@ -178,6 +234,17 @@ export class OpenClawChatRouteCard extends LitElement {
             : nothing}
           <span class="spacer"></span>
           ${this.renderSwitch(canShowTree, mode)}
+          <button
+            type="button"
+            class="expand"
+            title=${t("enterprise.routeExpand")}
+            aria-label=${t("enterprise.routeExpand")}
+            @click=${() => {
+              this.expanded = true;
+            }}
+          >
+            ⤢
+          </button>
         </div>
         ${route?.routes.length
           ? html`<div class="routes">${route.routes.map((id) => html`<code>${id}</code>`)}</div>`
@@ -188,6 +255,32 @@ export class OpenClawChatRouteCard extends LitElement {
         ></openclaw-workflow-tree-graph>
         ${route ? html`<div class="why">${route.rationale}</div>` : nothing}
       </div>
+      ${this.expanded ? this.renderExpandedModal(nodes, mode === "tree" ? planned : null) : nothing}
+    `;
+  }
+
+  private renderExpandedModal(
+    nodes: WorkflowTreeNode[],
+    routeNodeIds: string[] | null,
+  ): TemplateResult {
+    const close = () => {
+      this.expanded = false;
+    };
+    return html`
+      <openclaw-modal-dialog wide label=${t("enterprise.routeExpandTitle")} @modal-cancel=${close}>
+        <div class="modal-body">
+          <div class="modal-head">
+            <span class="title">${t("enterprise.routeExpandTitle")}</span>
+            <button type="button" class="modal-close" @click=${close}>
+              ${t("enterprise.routeExpandClose")}
+            </button>
+          </div>
+          <openclaw-workflow-tree-graph
+            .nodes=${nodes}
+            .routeNodeIds=${routeNodeIds}
+          ></openclaw-workflow-tree-graph>
+        </div>
+      </openclaw-modal-dialog>
     `;
   }
 

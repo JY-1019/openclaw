@@ -613,7 +613,6 @@ function renderTreeConfirmModal(props: EnterpriseProps): TemplateResult | typeof
 }
 
 function renderTreeDetail(tree: EnterpriseTreeDetail, props: EnterpriseProps): TemplateResult {
-  const { entities, relationships } = collectOntologyGraph(tree);
   return html`
     <div class="card-sub">${tree.name} — ${tree.id}@${tree.version}</div>
     ${tree.description
@@ -627,9 +626,29 @@ function renderTreeDetail(tree: EnterpriseTreeDetail, props: EnterpriseProps): T
       @node-select=${(event: CustomEvent<{ nodeId: string | null }>) =>
         props.onSelectNode(event.detail.nodeId)}
     ></openclaw-workflow-tree-graph>
-    ${renderNodeInspector(tree, props)}
+    ${renderNodeInspector(tree, props)} ${renderWholeTreeOverview(tree, props)}
+  `;
+}
 
-    <div class="card-title" style="margin-top: 16px;">${t("enterprise.ontologyTitle")}</div>
+/**
+ * The merged whole-tree ontology, shown only while no node is selected. Selecting
+ * a node swaps in that node's root→node scope via renderNodeInspector, so the two
+ * graphs never render together (the always-on merged graph used to read as a
+ * step's "default ontology" and be mistaken for a node's own scope). Labeled to
+ * make its whole-tree meaning explicit.
+ */
+function renderWholeTreeOverview(
+  tree: EnterpriseTreeDetail,
+  props: EnterpriseProps,
+): TemplateResult | typeof nothing {
+  if (props.selectedNodeId) {
+    return nothing;
+  }
+  const { entities, relationships } = collectOntologyGraph(tree);
+  return html`
+    <div class="card-title" style="margin-top: 16px;">
+      ${t("enterprise.wholeTreeOverviewTitle")}
+    </div>
     ${entities.length === 0
       ? html`<div class="muted" style="margin-top: 8px;">${t("enterprise.noOntology")}</div>`
       : html`<openclaw-ontology-graph

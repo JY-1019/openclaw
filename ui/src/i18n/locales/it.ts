@@ -237,6 +237,7 @@ export const it: TranslationMap = {
     treeUnavailable: "La definizione dell'albero non è più disponibile.",
     structureTitle: "Struttura",
     ontologyTitle: "Ontologia",
+    wholeTreeOverviewTitle: "Panoramica dell'albero completo",
     action: "Azione: {id}",
     constraint: "Vincolo: {text}",
     noOntology: "Questo albero non dichiara entità o relazioni ontologiche.",
@@ -262,6 +263,9 @@ export const it: TranslationMap = {
     routeViewTree: "Albero completo",
     routeViewTreeUnavailable:
       "L'albero è cambiato dopo questa esecuzione, quindi non può essere mostrato.",
+    routeExpand: "Espandi",
+    routeExpandTitle: "Percorso del workflow",
+    routeExpandClose: "Chiudi",
     propertyPrimaryKey: "PK",
     propertyRequired: "obbligatorio",
     mode: {

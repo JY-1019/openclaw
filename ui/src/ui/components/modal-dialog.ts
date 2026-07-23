@@ -13,9 +13,48 @@ const FOCUSABLE_SELECTOR = [
   "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
+/** Elements that can hold focus include SVG (e.g. tabbable graph nodes), not just HTML. */
+type FocusableElement = HTMLElement | SVGElement;
+
+/**
+ * The innermost focused element across shadow boundaries. `document.activeElement`
+ * only reports the outermost shadow host, so slotted content that itself uses web
+ * components (a graph whose nodes live in its own shadow root) needs this to
+ * capture and restore the real target.
+ */
+function deepActiveElement(root: Document | ShadowRoot): Element | null {
+  let active = root.activeElement;
+  while (active?.shadowRoot?.activeElement) {
+    active = active.shadowRoot.activeElement;
+  }
+  return active;
+}
+
+/** Collect focusables through the composed tree, descending into nested shadow roots. */
+function collectFocusablesDeep(node: Element, output: FocusableElement[]): void {
+  if (
+    (node instanceof HTMLElement || node instanceof SVGElement) &&
+    node.matches(FOCUSABLE_SELECTOR)
+  ) {
+    output.push(node);
+  }
+  for (const child of node.children) {
+    collectFocusablesDeep(child, output);
+  }
+  const shadow = node.shadowRoot;
+  if (shadow) {
+    for (const child of shadow.children) {
+      collectFocusablesDeep(child, output);
+    }
+  }
+}
+
 export class OpenClawModalDialog extends LitElement {
   @property() label = "";
   @property() description = "";
+  /** Widen the dialog for large content (e.g. an expanded graph). Reflected so
+   *  the `:host([wide])` style applies. */
+  @property({ type: Boolean, reflect: true }) wide = false;
 
   @query("dialog") private dialogElement?: HTMLDialogElement;
   @query("slot") private slotElement?: HTMLSlotElement;
@@ -52,6 +91,10 @@ export class OpenClawModalDialog extends LitElement {
       outline: none;
     }
 
+    :host([wide]) dialog {
+      width: min(960px, calc(100vw - 48px));
+    }
+
     dialog::backdrop {
       background: transparent;
     }
@@ -84,7 +127,9 @@ export class OpenClawModalDialog extends LitElement {
 
   override connectedCallback() {
     super.connectedCallback();
-    this.previouslyFocused = this.ownerDocument.activeElement;
+    // Capture the deep target (e.g. a trigger button inside another component's
+    // shadow root) so focus can return to it, not to its unfocusable host.
+    this.previouslyFocused = deepActiveElement(this.ownerDocument);
   }
 
   override firstUpdated() {
@@ -166,7 +211,7 @@ export class OpenClawModalDialog extends LitElement {
   private restoreFocus() {
     const target = this.previouslyFocused;
     this.previouslyFocused = null;
-    if (!(target instanceof HTMLElement) || !target.isConnected) {
+    if (!(target instanceof HTMLElement || target instanceof SVGElement) || !target.isConnected) {
       return;
     }
     requestAnimationFrame(() => {
@@ -228,33 +273,23 @@ export class OpenClawModalDialog extends LitElement {
     }
   }
 
-  private getActiveElement(): HTMLElement | null {
-    const active = this.ownerDocument.activeElement;
-    if (active === this && this.shadowRoot?.activeElement instanceof HTMLElement) {
-      return this.shadowRoot.activeElement;
-    }
-    return active instanceof HTMLElement ? active : null;
+  private getActiveElement(): FocusableElement | null {
+    // Pierce shadow boundaries: slotted content (and its own web components) can
+    // hold focus below the outermost host activeElement reports.
+    const active = deepActiveElement(this.ownerDocument);
+    return active instanceof HTMLElement || active instanceof SVGElement ? active : null;
   }
 
-  private getFocusableElements(): HTMLElement[] {
+  private getFocusableElements(): FocusableElement[] {
     const assigned = this.slotElement?.assignedElements({ flatten: true }) ?? [];
-    const focusable: HTMLElement[] = [];
+    const focusable: FocusableElement[] = [];
     for (const element of assigned) {
-      this.collectFocusable(element, focusable);
+      collectFocusablesDeep(element, focusable);
     }
     return focusable.filter((element) => this.isFocusable(element));
   }
 
-  private collectFocusable(element: Element, output: HTMLElement[]) {
-    if (element instanceof HTMLElement && element.matches(FOCUSABLE_SELECTOR)) {
-      output.push(element);
-    }
-    for (const child of element.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)) {
-      output.push(child);
-    }
-  }
-
-  private isFocusable(element: HTMLElement): boolean {
+  private isFocusable(element: FocusableElement): boolean {
     if (element.closest("[hidden], [inert]")) {
       return false;
     }

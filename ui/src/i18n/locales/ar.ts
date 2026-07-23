@@ -233,6 +233,7 @@ export const ar: TranslationMap = {
     treeUnavailable: "تعريف الشجرة لم يعد متاحًا.",
     structureTitle: "الهيكل",
     ontologyTitle: "الأنطولوجيا",
+    wholeTreeOverviewTitle: "نظرة عامة على الشجرة الكاملة",
     action: "إجراء: {id}",
     constraint: "قيد: {text}",
     noOntology: "لا تُعلن هذه الشجرة عن أي كيانات أو علاقات أنطولوجية.",
@@ -257,6 +258,9 @@ export const ar: TranslationMap = {
     routeViewRoute: "المسار فقط",
     routeViewTree: "الشجرة الكاملة",
     routeViewTreeUnavailable: "تغيّرت الشجرة منذ هذا التشغيل، لذا لا يمكن عرضها.",
+    routeExpand: "توسيع",
+    routeExpandTitle: "مسار سير العمل",
+    routeExpandClose: "إغلاق",
     propertyPrimaryKey: "PK",
     propertyRequired: "مطلوب",
     mode: {

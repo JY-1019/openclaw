@@ -238,6 +238,7 @@ export const uk: TranslationMap = {
     treeUnavailable: "Визначення дерева більше недоступне.",
     structureTitle: "Структура",
     ontologyTitle: "Онтологія",
+    wholeTreeOverviewTitle: "Огляд усього дерева",
     action: "Дія: {id}",
     constraint: "Обмеження: {text}",
     noOntology: "Це дерево не оголошує сутностей або зв'язків онтології.",
@@ -264,6 +265,9 @@ export const uk: TranslationMap = {
     routeViewTree: "Усе дерево",
     routeViewTreeUnavailable:
       "Дерево змінилося з моменту цього запуску, тому його неможливо відобразити.",
+    routeExpand: "Розгорнути",
+    routeExpandTitle: "Маршрут робочого процесу",
+    routeExpandClose: "Закрити",
     propertyPrimaryKey: "PK",
     propertyRequired: "обов'язкове",
     mode: {

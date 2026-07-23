@@ -235,6 +235,7 @@ export const vi: TranslationMap = {
     treeUnavailable: "Định nghĩa cây không còn khả dụng.",
     structureTitle: "Cấu trúc",
     ontologyTitle: "Bản thể học",
+    wholeTreeOverviewTitle: "Tổng quan toàn bộ cây",
     action: "Hành động: {id}",
     constraint: "Ràng buộc: {text}",
     noOntology: "Cây này không khai báo thực thể hoặc mối quan hệ bản thể học nào.",
@@ -259,6 +260,9 @@ export const vi: TranslationMap = {
     routeViewRoute: "Chỉ tuyến",
     routeViewTree: "Toàn bộ cây",
     routeViewTreeUnavailable: "Cây đã thay đổi kể từ lần chạy này, vì vậy không thể hiển thị.",
+    routeExpand: "Mở rộng",
+    routeExpandTitle: "Tuyến quy trình",
+    routeExpandClose: "Đóng",
     propertyPrimaryKey: "PK",
     propertyRequired: "bắt buộc",
     mode: {

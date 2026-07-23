@@ -244,6 +244,7 @@ export const de: TranslationMap = {
     treeUnavailable: "Die Baumdefinition ist nicht mehr verfügbar.",
     structureTitle: "Struktur",
     ontologyTitle: "Ontologie",
+    wholeTreeOverviewTitle: "Gesamtbaumübersicht",
     action: "Aktion: {id}",
     constraint: "Einschränkung: {text}",
     noOntology: "Dieser Baum deklariert keine Ontologie-Entitäten oder -Beziehungen.",
@@ -270,6 +271,9 @@ export const de: TranslationMap = {
     routeViewTree: "Gesamter Baum",
     routeViewTreeUnavailable:
       "Der Baum hat sich seit diesem Durchlauf geändert und kann daher nicht angezeigt werden.",
+    routeExpand: "Erweitern",
+    routeExpandTitle: "Workflow-Route",
+    routeExpandClose: "Schließen",
     propertyPrimaryKey: "PK",
     propertyRequired: "erforderlich",
     mode: {

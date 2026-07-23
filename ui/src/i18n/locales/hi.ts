@@ -234,6 +234,7 @@ export const hi: TranslationMap = {
     treeUnavailable: "ट्री परिभाषा अब उपलब्ध नहीं है।",
     structureTitle: "संरचना",
     ontologyTitle: "ऑन्टोलॉजी",
+    wholeTreeOverviewTitle: "संपूर्ण ट्री अवलोकन",
     action: "क्रिया: {id}",
     constraint: "बाधा: {text}",
     noOntology: "यह ट्री कोई ऑन्टोलॉजी इकाई या संबंध घोषित नहीं करता।",
@@ -258,6 +259,9 @@ export const hi: TranslationMap = {
     routeViewRoute: "केवल रूट",
     routeViewTree: "पूरा ट्री",
     routeViewTreeUnavailable: "इस रन के बाद से ट्री बदल गया है, इसलिए इसे दिखाया नहीं जा सकता।",
+    routeExpand: "विस्तार करें",
+    routeExpandTitle: "वर्कफ़्लो रूट",
+    routeExpandClose: "बंद करें",
     propertyPrimaryKey: "PK",
     propertyRequired: "आवश्यक",
     mode: {

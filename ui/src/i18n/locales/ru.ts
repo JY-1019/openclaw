@@ -239,6 +239,7 @@ export const ru: TranslationMap = {
     treeUnavailable: "Определение дерева больше недоступно.",
     structureTitle: "Структура",
     ontologyTitle: "Онтология",
+    wholeTreeOverviewTitle: "Обзор всего дерева",
     action: "Действие: {id}",
     constraint: "Ограничение: {text}",
     noOntology: "Это дерево не содержит сущностей или связей онтологии.",
@@ -265,6 +266,9 @@ export const ru: TranslationMap = {
     routeViewTree: "Всё дерево",
     routeViewTreeUnavailable:
       "Дерево изменилось с момента этого запуска, поэтому его невозможно отобразить.",
+    routeExpand: "Развернуть",
+    routeExpandTitle: "Маршрут workflow",
+    routeExpandClose: "Закрыть",
     propertyPrimaryKey: "PK",
     propertyRequired: "обязательно",
     mode: {

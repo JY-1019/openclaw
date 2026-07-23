@@ -238,6 +238,7 @@ export const pl: TranslationMap = {
     treeUnavailable: "Definicja drzewa nie jest już dostępna.",
     structureTitle: "Struktura",
     ontologyTitle: "Ontologia",
+    wholeTreeOverviewTitle: "Przegląd całego drzewa",
     action: "Akcja: {id}",
     constraint: "Ograniczenie: {text}",
     noOntology: "To drzewo nie deklaruje żadnych encji ani relacji ontologicznych.",
@@ -264,6 +265,9 @@ export const pl: TranslationMap = {
     routeViewTree: "Całe drzewo",
     routeViewTreeUnavailable:
       "Drzewo zmieniło się od tego uruchomienia, więc nie można go wyświetlić.",
+    routeExpand: "Rozwiń",
+    routeExpandTitle: "Trasa workflow",
+    routeExpandClose: "Zamknij",
     propertyPrimaryKey: "PK",
     propertyRequired: "wymagane",
     mode: {

@@ -241,6 +241,7 @@ export const ja_JP: TranslationMap = {
     treeUnavailable: "ツリー定義は利用できなくなりました。",
     structureTitle: "構造",
     ontologyTitle: "オントロジー",
+    wholeTreeOverviewTitle: "ツリー全体の概要",
     action: "アクション: {id}",
     constraint: "制約: {text}",
     noOntology: "このツリーにはオントロジーエンティティやリレーションシップが宣言されていません。",
@@ -265,6 +266,9 @@ export const ja_JP: TranslationMap = {
     routeViewRoute: "ルートのみ",
     routeViewTree: "ツリー全体",
     routeViewTreeUnavailable: "この実行以降にツリーが変更されたため、表示できません。",
+    routeExpand: "展開",
+    routeExpandTitle: "ワークフロールート",
+    routeExpandClose: "閉じる",
     propertyPrimaryKey: "PK",
     propertyRequired: "必須",
     mode: {

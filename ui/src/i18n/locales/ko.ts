@@ -235,6 +235,7 @@ export const ko: TranslationMap = {
     treeUnavailable: "트리 정의를 더 이상 사용할 수 없습니다.",
     structureTitle: "구조",
     ontologyTitle: "온톨로지",
+    wholeTreeOverviewTitle: "전체 트리 개요",
     action: "액션: {id}",
     constraint: "제약 조건: {text}",
     noOntology: "이 트리에는 선언된 온톨로지 엔터티 또는 관계가 없습니다.",
@@ -259,6 +260,9 @@ export const ko: TranslationMap = {
     routeViewRoute: "경로만",
     routeViewTree: "전체 트리",
     routeViewTreeUnavailable: "이 실행 이후 트리가 변경되어 표시할 수 없습니다.",
+    routeExpand: "펼치기",
+    routeExpandTitle: "워크플로 경로",
+    routeExpandClose: "닫기",
     propertyPrimaryKey: "PK",
     propertyRequired: "필수",
     mode: {

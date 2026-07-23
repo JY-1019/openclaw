@@ -237,6 +237,7 @@ export const id: TranslationMap = {
     treeUnavailable: "Definisi tree tidak lagi tersedia.",
     structureTitle: "Struktur",
     ontologyTitle: "Ontologi",
+    wholeTreeOverviewTitle: "Ikhtisar seluruh pohon",
     action: "Aksi: {id}",
     constraint: "Batasan: {text}",
     noOntology: "Tree ini tidak mendeklarasikan entitas atau relasi ontologi.",
@@ -262,6 +263,9 @@ export const id: TranslationMap = {
     routeViewTree: "Seluruh pohon",
     routeViewTreeUnavailable:
       "Pohon telah berubah sejak eksekusi ini, sehingga tidak dapat ditampilkan.",
+    routeExpand: "Perluas",
+    routeExpandTitle: "Rute alur kerja",
+    routeExpandClose: "Tutup",
     propertyPrimaryKey: "PK",
     propertyRequired: "wajib",
     mode: {

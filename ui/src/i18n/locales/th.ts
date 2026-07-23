@@ -231,6 +231,7 @@ export const th: TranslationMap = {
     treeUnavailable: "คำจำกัดความของต้นไม้ไม่พร้อมใช้งานแล้ว",
     structureTitle: "โครงสร้าง",
     ontologyTitle: "ออนโทโลยี",
+    wholeTreeOverviewTitle: "ภาพรวมทั้งหมด",
     action: "แอคชัน: {id}",
     constraint: "ข้อจำกัด: {text}",
     noOntology: "ต้นไม้นี้ไม่มีเอนทิตีหรือความสัมพันธ์ของออนโทโลยี",
@@ -255,6 +256,9 @@ export const th: TranslationMap = {
     routeViewRoute: "เฉพาะเส้นทาง",
     routeViewTree: "ทั้งต้นไม้",
     routeViewTreeUnavailable: "ต้นไม้มีการเปลี่ยนแปลงตั้งแต่การรันครั้งนี้ จึงไม่สามารถแสดงได้",
+    routeExpand: "ขยาย",
+    routeExpandTitle: "เส้นทางเวิร์กโฟลว์",
+    routeExpandClose: "ปิด",
     propertyPrimaryKey: "PK",
     propertyRequired: "จำเป็น",
     mode: {

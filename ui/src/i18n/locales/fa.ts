@@ -238,6 +238,7 @@ export const fa: TranslationMap = {
     treeUnavailable: "تعریف درخت دیگر در دسترس نیست.",
     structureTitle: "ساختار",
     ontologyTitle: "آنتولوژی",
+    wholeTreeOverviewTitle: "نمای کلی درخت",
     action: "اقدام: {id}",
     constraint: "محدودیت: {text}",
     noOntology: "این درخت هیچ موجودیت یا رابطه آنتولوژی تعریف نکرده است.",
@@ -262,6 +263,9 @@ export const fa: TranslationMap = {
     routeViewRoute: "فقط مسیر",
     routeViewTree: "کل درخت",
     routeViewTreeUnavailable: "درخت از زمان این اجرا تغییر کرده است، بنابراین قابل نمایش نیست.",
+    routeExpand: "گسترش",
+    routeExpandTitle: "مسیر گردش کار",
+    routeExpandClose: "بستن",
     propertyPrimaryKey: "PK",
     propertyRequired: "الزامی",
     mode: {
