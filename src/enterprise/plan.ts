@@ -411,6 +411,10 @@ function appendOntologyGuidance(lines: string[], ontology: OntologyBinding, inde
     lines.push(`${indent}Denied tools: ${ontology.deniedTools.toSorted().join(", ")}`);
   }
   if (ontology.knowledgeFoundations?.length) {
+    // Ids only: which foundation covers what is a RUNTIME fact (the descriptor
+    // from the live registry), and this digest is built from the plan alone. The
+    // human-readable routing labels live in the `knowledge_search` tool
+    // description, which is assembled after runtime plugins register.
     lines.push(
       `${indent}Knowledge sources: ${ontology.knowledgeFoundations.toSorted().join(", ")}`,
     );

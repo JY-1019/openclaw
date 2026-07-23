@@ -27,6 +27,8 @@ export type LightRagFoundationDescriptor = {
   serverUrl: string;
   kind: KnowledgeFoundationKind;
   mode: LightRagQueryMode;
+  /** Operator-supplied one-line summary of what this foundation covers. */
+  description?: string;
   /**
    * Resolved X-API-Key literal. The manifest declares `foundations.*.apiKey` as
    * a secret input, so the secrets runtime materializes any `${ENV}`/SecretRef
@@ -61,12 +63,14 @@ export function parseLightRagFoundations(pluginConfig: unknown): LightRagFoundat
     }
     const mode = QUERY_MODES.find((candidate) => candidate === record.mode) ?? DEFAULT_MODE;
     const kind = FOUNDATION_KINDS.find((candidate) => candidate === record.kind) ?? DEFAULT_KIND;
+    const description = nonBlankString(record.description);
     const apiKey = nonBlankString(record.apiKey);
     descriptors.push({
       id,
       serverUrl,
       kind,
       mode,
+      ...(description !== undefined ? { description } : {}),
       ...(apiKey !== undefined ? { apiKey } : {}),
     });
   }

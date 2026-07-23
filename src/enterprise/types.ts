@@ -405,6 +405,13 @@ export type KnowledgeFoundationDescriptor = {
    * out-of-band (see resolveEnterpriseKnowledge's catch).
    */
   detail?: string;
+  /**
+   * One-line, non-secret summary of what this foundation covers. Surfaced to the
+   * model in the step digest so it can route a `knowledge_search` to the right
+   * foundation (see knowledge-search-tool's `foundations` arg). Like `detail` it
+   * crosses the gateway to the model/Control UI, so keep it credential-free.
+   */
+  description?: string;
 };
 
 /** Outcome of probing whether a foundation's backing service is reachable. */

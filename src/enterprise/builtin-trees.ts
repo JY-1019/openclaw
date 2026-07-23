@@ -88,6 +88,11 @@ export const BUILTIN_SUPPORT_EXAMPLE_TREE: WorkflowTreeDefinition = {
       // the declared knowledge source is queryable under the path scope. Declare the
       // KB allow-list at the root too, or an omitted list would let the root scope
       // (used by non-advancing CLI/ACP runs) query every registered foundation.
+      //
+      // `clawworks.support-kb` is an allow-list reference, not a registration: no
+      // adapter ships under this id, so knowledge_search returns nothing until an
+      // operator registers a foundation with this id (e.g. a LightRAG server — see
+      // docs/concepts/clawworks-enterprise).
       allowedTools: ["memory_search", "memory_get", "message", "knowledge_search"],
       knowledgeFoundations: ["clawworks.support-kb"],
       constraints: [

@@ -23,6 +23,7 @@ export default definePluginEntry({
           serverUrl: descriptor.serverUrl,
           kind: descriptor.kind,
           mode: descriptor.mode,
+          ...(descriptor.description !== undefined ? { description: descriptor.description } : {}),
           ...(descriptor.apiKey !== undefined ? { apiKey: descriptor.apiKey } : {}),
         }),
       );

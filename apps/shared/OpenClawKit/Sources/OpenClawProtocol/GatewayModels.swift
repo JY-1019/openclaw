@@ -7367,6 +7367,7 @@ public struct EnterpriseKnowledgeFoundationSummary: Codable, Sendable {
     public let kind: EnterpriseKnowledgeFoundationKind
     public let displayname: String
     public let detail: String?
+    public let description: String?
     public let referencedby: [EnterpriseKnowledgeFoundationReference]
 
     public init(
@@ -7374,12 +7375,14 @@ public struct EnterpriseKnowledgeFoundationSummary: Codable, Sendable {
         kind: EnterpriseKnowledgeFoundationKind,
         displayname: String,
         detail: String?,
+        description: String? = nil,
         referencedby: [EnterpriseKnowledgeFoundationReference])
     {
         self.id = id
         self.kind = kind
         self.displayname = displayname
         self.detail = detail
+        self.description = description
         self.referencedby = referencedby
     }
 
@@ -7388,6 +7391,7 @@ public struct EnterpriseKnowledgeFoundationSummary: Codable, Sendable {
         case kind
         case displayname = "displayName"
         case detail
+        case description
         case referencedby = "referencedBy"
     }
 }

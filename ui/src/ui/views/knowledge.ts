@@ -93,6 +93,9 @@ function renderFoundation(foundation: EnterpriseKnowledgeFoundationSummary, prop
             >${kindLabel(foundation.kind)}</span
           >
         </div>
+        ${foundation.description
+          ? html`<div class="list-sub">${foundation.description}</div>`
+          : nothing}
         <div class="list-sub">${foundation.id}</div>
         ${foundation.detail ? html`<div class="list-meta">${foundation.detail}</div>` : nothing}
       </div>

@@ -81,6 +81,15 @@ describe("renderKnowledge", () => {
     expect(container.textContent).toContain("local");
   });
 
+  it("renders the foundation description when one is provided", () => {
+    const container = renderInto(
+      buildProps({
+        foundations: [foundation({ description: "Support policies and macros" })],
+      }),
+    );
+    expect(container.textContent).toContain("Support policies and macros");
+  });
+
   it("calls back with the foundation id when test connection is clicked", () => {
     const onTestConnection = vi.fn();
     const container = renderInto(buildProps({ foundations: [foundation()], onTestConnection }));

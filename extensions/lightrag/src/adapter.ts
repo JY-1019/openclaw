@@ -37,6 +37,8 @@ export type LightRagAdapterOptions = {
   /** Who administers this server's content (operator-declared, see config). */
   kind: KnowledgeFoundationKind;
   mode: LightRagQueryMode;
+  /** Operator-supplied one-line summary of what this foundation covers. */
+  description?: string;
   apiKey?: string;
   /** Override the default global fetch (tests). */
   fetchImpl?: FetchLike;
@@ -163,6 +165,7 @@ export class LightRagKnowledgeFoundation implements KnowledgeFoundationAdapter {
       kind: this.options.kind,
       displayName: this.options.foundationId,
       detail: stripUrlCredentials(this.options.serverUrl),
+      ...(this.options.description !== undefined ? { description: this.options.description } : {}),
     };
   }
 

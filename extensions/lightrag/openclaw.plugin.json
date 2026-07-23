@@ -25,6 +25,10 @@
               "type": "string",
               "description": "Base URL of the LightRAG API server (e.g. http://localhost:9621)."
             },
+            "description": {
+              "type": "string",
+              "description": "One-line summary of what this foundation covers. Surfaced to the model in the step digest (so it can route knowledge_search to the right source) and to operators in the Knowledge tab. Keep it non-secret."
+            },
             "kind": {
               "type": "string",
               "enum": ["remote", "local"],

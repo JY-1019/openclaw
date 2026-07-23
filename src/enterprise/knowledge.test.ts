@@ -139,6 +139,54 @@ describe("resolveEnterpriseKnowledge", () => {
     ]);
   });
 
+  it("targets only the requested foundations within the step allow-list", async () => {
+    registerEnterpriseActiveRun(run({ knowledgeFoundations: ["acme.a", "acme.b"] }));
+    registerEnterpriseKnowledgeFoundation("acme.a", foundation("refund a"));
+    registerEnterpriseKnowledgeFoundation("acme.b", foundation("refund b"));
+
+    const result = await resolveEnterpriseKnowledge({
+      runId: "run-k",
+      query: "refund",
+      foundations: ["acme.a"],
+    });
+    expect(result.snippets.map((snippet) => snippet.foundationId)).toEqual(["acme.a"]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it("skips a requested foundation outside the step allow-list without querying it", async () => {
+    registerEnterpriseActiveRun(run({ knowledgeFoundations: ["acme.a"] }));
+    registerEnterpriseKnowledgeFoundation("acme.a", foundation("refund a"));
+    registerEnterpriseKnowledgeFoundation("acme.secret", foundation("refund secret"));
+
+    const result = await resolveEnterpriseKnowledge({
+      runId: "run-k",
+      query: "refund",
+      foundations: ["acme.secret"],
+    });
+    // The targeting arg is a convenience, never an authority: an id outside the
+    // step's allow-list is reported, not queried, and no other foundation leaks in.
+    expect(result.snippets).toEqual([]);
+    expect(result.skipped).toEqual([
+      { foundationId: "acme.secret", reason: "not in this step's knowledge allow-list" },
+    ]);
+  });
+
+  it("narrows to nothing for an explicit empty foundations selection (never widens to all)", async () => {
+    registerEnterpriseActiveRun(run({ knowledgeFoundations: ["acme.a", "acme.b"] }));
+    registerEnterpriseKnowledgeFoundation("acme.a", foundation("refund a"));
+    registerEnterpriseKnowledgeFoundation("acme.b", foundation("refund b"));
+
+    const result = await resolveEnterpriseKnowledge({
+      runId: "run-k",
+      query: "refund",
+      foundations: [],
+    });
+    // An explicit empty selection is honored as "search none", not silently
+    // widened back to every allowed foundation.
+    expect(result.snippets).toEqual([]);
+    expect(result.skipped).toEqual([]);
+  });
+
   it("skips and traces a foundation denied by a knowledge policy in enforce mode", async () => {
     const events: SinkEvent[] = [];
     registerEnterpriseActiveRun(

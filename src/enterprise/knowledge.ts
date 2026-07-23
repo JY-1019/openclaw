@@ -252,6 +252,45 @@ function foundationAllowedByPath(
   });
 }
 
+/** One knowledge foundation a workflow references, with a short summary for routing. */
+export type WorkflowKnowledgeFoundation = {
+  foundationId: string;
+  /** One-line summary of what it covers, when the adapter descriptor supplies one. */
+  description?: string;
+};
+
+/**
+ * The foundations this workflow's tree references (the union of every step's
+ * `knowledgeFoundations`), each with a short summary of what it covers. Feeds the
+ * `knowledge_search` tool description as a glossary so the model can route a
+ * `foundations` target; which foundation a given step is scoped to stays in the
+ * step digest, and retrieval enforces the active step's allow-list.
+ *
+ * Two deliberate choices: (1) the union over ALL steps — not the active node —
+ * keeps the list stable for the run (the active node advances per turn while the
+ * tool description is frozen at assembly) and scoped to this workflow rather than
+ * the whole registry (no cross-tree id leak); (2) only the descriptor's
+ * `description` is surfaced — `displayName` is an operator-facing label that
+ * adapters were never asked to keep model-safe. Read at tool-assembly time,
+ * after runtime plugins register, so the summaries are populated.
+ */
+export function describeWorkflowKnowledgeFoundations(runId: string): WorkflowKnowledgeFoundation[] {
+  const run = getEnterpriseActiveRun(runId);
+  if (!run) {
+    return [];
+  }
+  const referenced = new Set<string>();
+  for (const node of run.plan.nodes) {
+    for (const foundationId of node.ontology.knowledgeFoundations ?? []) {
+      referenced.add(foundationId);
+    }
+  }
+  return [...referenced].toSorted().map((foundationId) => {
+    const { description } = describeFoundation(foundationId);
+    return description !== undefined ? { foundationId, description } : { foundationId };
+  });
+}
+
 /** A foundation the retrieval skipped, with the governance reason. */
 export type SkippedKnowledgeFoundation = {
   foundationId: string;
@@ -276,6 +315,13 @@ export type KnowledgeRetrievalResult = {
 export async function resolveEnterpriseKnowledge(params: {
   runId: string;
   query: string;
+  /**
+   * Model-supplied targeting: restrict retrieval to these foundation ids. This
+   * is a convenience narrowing, never an authority — the step's ontology
+   * allow-list still gates every id, so a requested id the step does not permit
+   * is reported as skipped, not queried.
+   */
+  foundations?: string[];
   limit?: number;
   signal?: AbortSignal;
 }): Promise<KnowledgeRetrievalResult> {
@@ -293,12 +339,30 @@ export async function resolveEnterpriseKnowledge(params: {
   // Audit inherits down the path like the tool-call gate: an audited root
   // traces default-allowed retrievals from its leaves.
   const auditEnabled = path.some((step) => step.ontology.audit === true);
+  // A requested set narrows which allowed foundations are queried; an omitted
+  // (undefined) set queries every allowed foundation (unchanged behavior). An
+  // explicit empty set is honored as "narrow to nothing", never widened back to
+  // all — targeting is a convenience narrowing that must never broaden scope.
+  const requested = params.foundations ? new Set(params.foundations) : undefined;
 
   const snippets: KnowledgeSnippet[] = [];
   const skipped: SkippedKnowledgeFoundation[] = [];
+  // Report requested ids the step's ontology forbids before querying: the
+  // targeting arg must surface a denial, never silently widen scope past the
+  // allow-list. Sorted for a deterministic model-facing order.
+  if (requested) {
+    for (const foundationId of [...requested].toSorted()) {
+      if (!foundationAllowedByPath(path, foundationId)) {
+        skipped.push({ foundationId, reason: "not in this step's knowledge allow-list" });
+      }
+    }
+  }
   for (const foundationId of listEnterpriseKnowledgeFoundationIds()) {
     if (!foundationAllowedByPath(path, foundationId)) {
       continue; // outside the step's ontology allow-list; not a governance denial
+    }
+    if (requested && !requested.has(foundationId)) {
+      continue; // model narrowed the search to a subset that excludes this one
     }
     const decision = evaluateKnowledgeRetrievalGovernance({
       plan: run.plan,

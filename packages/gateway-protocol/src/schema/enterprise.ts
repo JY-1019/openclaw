@@ -595,6 +595,8 @@ export const EnterpriseKnowledgeFoundationSummarySchema = Type.Object(
     displayName: Type.String(),
     /** Non-secret locator (e.g. server origin); adapters strip credentials. */
     detail: Type.Optional(Type.String()),
+    /** Non-secret one-line summary of what the foundation covers. */
+    description: Type.Optional(Type.String()),
     /** Nodes whose ontology allow-list names this foundation. */
     referencedBy: Type.Array(EnterpriseKnowledgeFoundationReferenceSchema),
   },

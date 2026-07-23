@@ -285,6 +285,24 @@ A node references the foundation by id in `knowledgeFoundations`. One
 foundation failing (for example a down server) skips that foundation rather
 than failing the whole retrieval.
 
+By default `knowledge_search` queries every foundation the step allows and
+merges the results. When several are in scope, the model can pass a
+`foundations` argument to target specific ids; any id outside the step's
+allow-list is reported as skipped, never queried, so targeting narrows the
+search but never widens authority. To help the model route, the
+`knowledge_search` tool description lists the foundations this workflow
+references, each with the short summary from its adapter's
+`describe().description` (the operator-facing display name is never surfaced to
+the model). Returned snippets carry a `foundationId` (and a `source` when the
+foundation provides one), and the tool advises the model to cite the foundation,
+plus the `source` when the snippet has one, whenever it uses a snippet.
+
+The shipped `clawworks.support` example work-map references a
+`clawworks.support-kb` foundation. That id is an allow-list reference only — no
+adapter registers it by default, so `knowledge_search` returns nothing until an
+operator registers a foundation under that id (for example a LightRAG server
+with `"id": "clawworks.support-kb"`, as above).
+
 Each foundation declares a `kind`: `remote` (default) when someone else
 operates the server, or `local` when this deployment owns it. The distinction
 is an explicit operator declaration, not something inferred from the URL, and it

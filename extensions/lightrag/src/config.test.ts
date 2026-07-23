@@ -40,6 +40,27 @@ describe("parseLightRagFoundations", () => {
     ]);
   });
 
+  it("parses an optional non-blank description and omits it when blank/absent", () => {
+    const result = parseLightRagFoundations({
+      foundations: [
+        { id: "with.desc", serverUrl: "http://kb", description: "  Support policies  " },
+        { id: "blank.desc", serverUrl: "http://kb", description: "   " },
+        { id: "no.desc", serverUrl: "http://kb" },
+      ],
+    });
+    expect(result).toEqual([
+      {
+        id: "with.desc",
+        serverUrl: "http://kb",
+        kind: "remote",
+        mode: "mix",
+        description: "Support policies",
+      },
+      { id: "blank.desc", serverUrl: "http://kb", kind: "remote", mode: "mix" },
+      { id: "no.desc", serverUrl: "http://kb", kind: "remote", mode: "mix" },
+    ]);
+  });
+
   it("defaults kind to remote so an upgrade never exposes document management", () => {
     // Foundations configured before `kind` existed must stay read-only: the
     // operator has not declared that server as theirs to administer.

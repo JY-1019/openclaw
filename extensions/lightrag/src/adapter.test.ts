@@ -135,6 +135,21 @@ describe("LightRagKnowledgeFoundation", () => {
       });
     });
 
+    it("includes the configured description so the model can route to it", () => {
+      const adapter = buildAdapter({
+        foundationId: "acme.kb",
+        serverUrl: "http://localhost:9621",
+        kind: "local",
+        description: "Support policies and macros",
+      });
+      expect(adapter.describe()).toEqual({
+        kind: "local",
+        displayName: "acme.kb",
+        detail: "http://localhost:9621",
+        description: "Support policies and macros",
+      });
+    });
+
     it("strips credentials embedded in the server url", () => {
       // describe() crosses the gateway into the Control UI, so a password in
       // the configured url must never reach an operator's screen.
